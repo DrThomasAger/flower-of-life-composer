@@ -14,8 +14,9 @@
   button:hover { border-color: #999; }
   #stage { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; }
   svg#canvas { width: min(88vw, 72vh); height: min(88vw, 72vh); cursor: pointer; }
-  #canvas circle { transition: r 0.55s cubic-bezier(.22,.8,.35,1), cx 0.65s cubic-bezier(.25,.7,.3,1), cy 0.65s cubic-bezier(.25,.7,.3,1), stroke-opacity 0.4s ease, stroke-width 0.2s ease; }
-  .no-anim #canvas circle { transition: none !important; }
+  #canvas circle { transition: r 0.3s cubic-bezier(.22,.8,.35,1), cx 0.35s cubic-bezier(.25,.7,.3,1), cy 0.35s cubic-bezier(.25,.7,.3,1), stroke-opacity 0.25s ease, stroke-width 0.15s ease; }
+  #canvas clipPath rect { transition: x 0.35s ease, y 0.35s ease, width 0.35s ease, height 0.35s ease; }
+  .no-anim #canvas circle, .no-anim #canvas clipPath rect { transition: none !important; }
   #stageName { color: #cbb; letter-spacing: 0.06em; min-width: 7.5em; display: inline-block; }
   #hint { font-size: 0.85em; color: #999; margin: 8px 0 16px; }
   #savePanel { position: fixed; inset: 0; background: rgba(5,5,10,0.7); display: none; align-items: center; justify-content: center; }
@@ -168,7 +169,7 @@ function applyView() {
 function tweenView(cx, half) {
   if (viewAnim) cancelAnimationFrame(viewAnim);
   applyView();
-  const from = { ...view }, dur = 450, t0 = performance.now();
+  const from = { ...view }, dur = 300, t0 = performance.now();
   const ease = t => 1 - Math.pow(1 - t, 3);
   function step(now) {
     const t = Math.min((now - t0) / dur, 1), e = ease(t);
@@ -193,8 +194,8 @@ function reconcile() {
     clipCircleEl.style.r = m.clipR + 'px';
     patternG.setAttribute('clip-path', 'url(#clipCircle)');
   } else {
-    clipSquareEl.setAttribute('x', -m.half); clipSquareEl.setAttribute('y', -m.half);
-    clipSquareEl.setAttribute('width', 2 * m.half); clipSquareEl.setAttribute('height', 2 * m.half);
+    clipSquareEl.style.x = -m.half + 'px'; clipSquareEl.style.y = -m.half + 'px';
+    clipSquareEl.style.width = 2 * m.half + 'px'; clipSquareEl.style.height = 2 * m.half + 'px';
     patternG.setAttribute('clip-path', 'url(#clipSquare)');
   }
 
@@ -236,7 +237,7 @@ function reconcile() {
       const [x, y] = centerOf(i, j);
       el.setAttribute('stroke', '#ffffff');
       const parent = nearestExisting(x, y);
-      const delay = Math.min(appearIdx * 45, 900);
+      const delay = Math.min(appearIdx * 22, 440);
       appearIdx++;
       if (parent) {
         // arrive from behind the nearest existing circle, already whole
@@ -259,7 +260,7 @@ function reconcile() {
         el.style.r = R + 'px';
       }
       circleEls.set(key, el);
-      setTimeout(() => { el.style.transitionDelay = ''; }, delay + 700);
+      setTimeout(() => { el.style.transitionDelay = ''; }, delay + 400);
     } else {
       const [x, y] = centerOf(i, j);
       el.style.cx = x.toFixed(2) + 'px';
@@ -287,7 +288,7 @@ function reconcile() {
     el.style.strokeOpacity = '0';
     dying.set(key, setTimeout(() => {
       el.remove(); circleEls.delete(key); dying.delete(key);
-    }, 700));
+    }, 420));
   }
 }
 
@@ -432,7 +433,7 @@ const opening = setInterval(() => {
   document.getElementById('growth').value = openStage;
   document.getElementById('stageName').textContent = STAGE_NAMES[openStage];
   reconcile();
-}, 1100);
+}, 650);
 }
 </script>
 </body>
