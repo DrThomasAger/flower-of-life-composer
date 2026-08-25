@@ -97,7 +97,7 @@ function hexLattice(rings) {
       if (i * i + i * j + j * j <= maxK) pts.push([i, j]);
   return pts;
 }
-function centerOf(i, j) { return [i * R + j * R / 2, j * S]; }
+function centerOf(i, j) { return [j * S, i * R + j * R / 2]; } // vertical axis: the traditional orientation
 
 function currentLattice(st) {
   let pts;
@@ -129,7 +129,7 @@ function metrics(st) {
   }
   let clipR, cx = 0, cy = 0;
   if (st.growth === 0) clipR = R;
-  else if (st.growth === 1) { clipR = 1.5 * R; cx = R / 2; }
+  else if (st.growth === 1) { clipR = 1.5 * R; cy = R / 2; }
   else clipR = (st.growth - 1) * R;
   const stroke = Math.max(Math.max(clipR, 250) * WEIGHTS[st.weight], 3);
   const gap = stroke * 3;
@@ -161,12 +161,12 @@ const bInner = document.getElementById('bInner');
 const bOuter = document.getElementById('bOuter');
 
 // viewBox tween
-let view = { cx: 0, half: 400 };
+let view = { cx: 0, cy: 0, half: 400 };
 let viewAnim = null;
 function applyView() {
-  svg.setAttribute('viewBox', `${(view.cx - view.half).toFixed(1)} ${(-view.half).toFixed(1)} ${(2 * view.half).toFixed(1)} ${(2 * view.half).toFixed(1)}`);
+  svg.setAttribute('viewBox', `${(view.cx - view.half).toFixed(1)} ${(view.cy - view.half).toFixed(1)} ${(2 * view.half).toFixed(1)} ${(2 * view.half).toFixed(1)}`);
 }
-function tweenView(cx, half) {
+function tweenView(cx, cy, half) {
   if (viewAnim) cancelAnimationFrame(viewAnim);
   applyView();
   const from = { ...view }, dur = 300, t0 = performance.now();
@@ -174,8 +174,9 @@ function tweenView(cx, half) {
   function step(now) {
     const t = Math.min((now - t0) / dur, 1), e = ease(t);
     view.cx = from.cx + (cx - from.cx) * e;
+    view.cy = from.cy + (cy - from.cy) * e;
     view.half = from.half + (half - from.half) * e;
-    svg.setAttribute('viewBox', `${(view.cx - view.half).toFixed(1)} ${(-view.half).toFixed(1)} ${(2 * view.half).toFixed(1)} ${(2 * view.half).toFixed(1)}`);
+    applyView();
     if (t < 1) viewAnim = requestAnimationFrame(step);
   }
   viewAnim = requestAnimationFrame(step);
@@ -186,11 +187,12 @@ function reconcile() {
   const lattice = currentLattice(state);
   const targetKeys = new Set(lattice.map(([i, j]) => i + ',' + j));
 
-  tweenView(m.cx, m.viewHalf);
+  tweenView(m.cx, m.cy, m.viewHalf);
 
   // clip
   if (m.mode === 'circle') {
     clipCircleEl.setAttribute('cx', m.cx);
+    clipCircleEl.setAttribute('cy', m.cy);
     clipCircleEl.style.r = m.clipR + 'px';
     patternG.setAttribute('clip-path', 'url(#clipCircle)');
   } else {
@@ -203,6 +205,7 @@ function reconcile() {
   const showB = m.mode === 'circle' && state.boundary;
   for (const [el, rr] of [[bInner, showB ? m.clipR + m.stroke / 2 : 0], [bOuter, showB ? m.outerR : 0]]) {
     el.setAttribute('cx', m.cx);
+    el.setAttribute('cy', m.cy);
     el.style.r = Math.max(rr, 0) + 'px';
     el.setAttribute('stroke-width', m.stroke.toFixed(2));
     el.setAttribute('stroke-opacity', showB ? 0.85 : 0);
@@ -297,12 +300,12 @@ function serialize(st, variant) {
   const m = metrics(st);
   const color = variant === 'positive' ? '#111111' : '#ffffff';
   const clipId = `fol-clip-${++exportCounter}`;
-  const half = m.viewHalf, cx = m.cx;
+  const half = m.viewHalf, cx = m.cx, cy = m.cy;
   const lines = [];
   lines.push('<?xml version="1.0" encoding="UTF-8"?>');
-  lines.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${(cx - half).toFixed(1)} ${(-half).toFixed(1)} ${(2 * half).toFixed(1)} ${(2 * half).toFixed(1)}">`);
-  if (variant === 'ground') lines.push(`  <rect x="${(cx - half).toFixed(1)}" y="${(-half).toFixed(1)}" width="${(2 * half).toFixed(1)}" height="${(2 * half).toFixed(1)}" fill="#000000"/>`);
-  if (m.mode === 'circle') lines.push(`  <defs><clipPath id="${clipId}"><circle cx="${m.cx}" cy="0" r="${m.clipR}"/></clipPath></defs>`);
+  lines.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${(cx - half).toFixed(1)} ${(cy - half).toFixed(1)} ${(2 * half).toFixed(1)} ${(2 * half).toFixed(1)}">`);
+  if (variant === 'ground') lines.push(`  <rect x="${(cx - half).toFixed(1)}" y="${(cy - half).toFixed(1)}" width="${(2 * half).toFixed(1)}" height="${(2 * half).toFixed(1)}" fill="#000000"/>`);
+  if (m.mode === 'circle') lines.push(`  <defs><clipPath id="${clipId}"><circle cx="${m.cx}" cy="${m.cy}" r="${m.clipR}"/></clipPath></defs>`);
   else lines.push(`  <defs><clipPath id="${clipId}"><rect x="${-m.half}" y="${-m.half}" width="${2 * m.half}" height="${2 * m.half}"/></clipPath></defs>`);
   lines.push(`  <g clip-path="url(#${clipId})" fill="none" stroke="${color}" stroke-width="${m.stroke.toFixed(2)}">`);
   for (const [i, j] of currentLattice(st)) {
@@ -312,8 +315,8 @@ function serialize(st, variant) {
   }
   lines.push('  </g>');
   if (m.mode === 'circle' && st.boundary) {
-    lines.push(`  <circle cx="${m.cx}" cy="0" r="${(m.clipR + m.stroke / 2).toFixed(2)}" fill="none" stroke="${color}" stroke-width="${m.stroke.toFixed(2)}"/>`);
-    lines.push(`  <circle cx="${m.cx}" cy="0" r="${m.outerR.toFixed(2)}" fill="none" stroke="${color}" stroke-width="${m.stroke.toFixed(2)}"/>`);
+    lines.push(`  <circle cx="${m.cx}" cy="${m.cy}" r="${(m.clipR + m.stroke / 2).toFixed(2)}" fill="none" stroke="${color}" stroke-width="${m.stroke.toFixed(2)}"/>`);
+    lines.push(`  <circle cx="${m.cx}" cy="${m.cy}" r="${m.outerR.toFixed(2)}" fill="none" stroke="${color}" stroke-width="${m.stroke.toFixed(2)}"/>`);
   }
   lines.push('</svg>');
   return lines.join('\n');
@@ -413,7 +416,7 @@ if (params.has('frame') && params.get('frame') === 'square') {
   zoomWrap.classList.remove('hidden');
 }
 if (params.has('still') || state.frame === 'square') {
-  view = { cx: 0, half: metrics(state).viewHalf };
+  view = { cx: 0, cy: metrics(state).cy, half: metrics(state).viewHalf };
   applyView();
   reconcile();
 } else {
@@ -422,7 +425,7 @@ if (params.has('still') || state.frame === 'square') {
 state.growth = 0;
 document.getElementById('growth').value = 0;
 document.getElementById('stageName').textContent = STAGE_NAMES[0];
-view = { cx: 0, half: metrics(state).viewHalf };
+view = { cx: 0, cy: metrics(state).cy, half: metrics(state).viewHalf };
 applyView();
 reconcile();
 let openStage = 0;
