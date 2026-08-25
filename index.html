@@ -12,6 +12,7 @@
   select { vertical-align: middle; }
   button { background: #1c1c26; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 7px 16px; font-family: inherit; font-size: 0.95em; cursor: pointer; }
   button:hover { border-color: #999; }
+  button.active { border-color: #cbb; background: #2a2438; }
   #stage { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; }
   svg#canvas { width: min(88vw, 72vh); height: min(88vw, 72vh); cursor: pointer; }
   #canvas circle { transition: r 0.3s cubic-bezier(.22,.8,.35,1), cx 0.35s cubic-bezier(.25,.7,.3,1), cy 0.35s cubic-bezier(.25,.7,.3,1), stroke-opacity 0.25s ease, stroke-width 0.15s ease; }
@@ -49,6 +50,7 @@
     </select>
   </label>
   <label id="boundaryWrap"><input type="checkbox" id="boundary" checked> Boundary rings</label>
+  <button id="restoreMode">Show removed</button>
   <button id="restoreAll">Restore all circles</button>
   <button id="save">Save SVG</button>
 </div>
@@ -84,6 +86,7 @@ const state = {
   removed: new Set(),   // "i,j" keys, durable intent
   boundary: true,
   weight: 'regular',
+  restoreMode: false,  // reveal all removed circles faintly; only they respond, ends itself when all have returned
 };
 const history = [];
 let hoverKey = null;
@@ -272,7 +275,9 @@ function reconcile() {
       el.style.strokeOpacity = ''; // revive if it was withdrawing
     }
     el.setAttribute('stroke-width', (isHover ? m.stroke * 1.8 : m.stroke).toFixed(2));
-    el.setAttribute('stroke-opacity', isRemoved ? (isHover ? 0.3 : 0) : (isHover ? 1 : 0.85));
+    el.setAttribute('stroke-opacity', isRemoved
+      ? (state.restoreMode ? (isHover ? 0.6 : 0.25) : (isHover ? 0.3 : 0))
+      : (isHover ? 1 : 0.85));
   });
 
   // withdrawing circles: slide back behind the nearest surviving circle
@@ -329,9 +334,11 @@ function nearestKey(ev) {
   const p = pt.matrixTransform(svg.getScreenCTM().inverse());
   let best = null, bestD = Infinity;
   for (const [i, j] of currentLattice(state)) {
+    const key = i + ',' + j;
+    if (state.restoreMode && !state.removed.has(key)) continue; // only absences respond in restore mode
     const [x, y] = centerOf(i, j);
     const d = Math.hypot(p.x - x, p.y - y);
-    if (d < bestD) { bestD = d; best = i + ',' + j; }
+    if (d < bestD) { bestD = d; best = key; }
   }
   return bestD <= R * 0.55 ? best : null;
 }
@@ -345,7 +352,8 @@ svg.addEventListener('click', (ev) => {
   const k = nearestKey(ev);
   if (!k) return;
   if (state.removed.has(k)) { state.removed.delete(k); history.push({ key: k, action: 'restore' }); }
-  else { state.removed.add(k); history.push({ key: k, action: 'remove' }); }
+  else if (!state.restoreMode) { state.removed.add(k); history.push({ key: k, action: 'remove' }); }
+  if (state.restoreMode && state.removed.size === 0) setRestoreMode(false); // all returned: the mode completes itself
   reconcile();
 });
 document.addEventListener('keydown', (ev) => {
@@ -383,9 +391,21 @@ document.getElementById('zoom').addEventListener('input', (ev) => {
 });
 document.getElementById('weight').addEventListener('change', (ev) => { state.weight = ev.target.value; reconcile(); });
 document.getElementById('boundary').addEventListener('change', (ev) => { state.boundary = ev.target.checked; reconcile(); });
+const restoreModeBtn = document.getElementById('restoreMode');
+function setRestoreMode(on) {
+  state.restoreMode = on;
+  restoreModeBtn.classList.toggle('active', on);
+  restoreModeBtn.textContent = on ? 'Showing removed…' : 'Show removed';
+}
+restoreModeBtn.addEventListener('click', () => {
+  if (!state.restoreMode && state.removed.size === 0) return; // nothing is absent
+  setRestoreMode(!state.restoreMode);
+  reconcile();
+});
 document.getElementById('restoreAll').addEventListener('click', () => {
   for (const k of state.removed) history.push({ key: k, action: 'restore' });
   state.removed.clear();
+  if (state.restoreMode) setRestoreMode(false);
   reconcile();
 });
 
