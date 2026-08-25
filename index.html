@@ -25,9 +25,13 @@
   #growBtn { font-size: 1.25em; letter-spacing: 0.14em; padding: 14px 64px; margin: 12px 0 4px; border-radius: 10px; border-color: #666; }
   #stage { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; }
   svg#canvas { width: min(88vw, 72vh); height: min(88vw, 72vh); cursor: pointer; }
-  #canvas circle { transition: r 0.3s cubic-bezier(.22,.8,.35,1), cx 0.35s cubic-bezier(.25,.7,.3,1), cy 0.35s cubic-bezier(.25,.7,.3,1), stroke-opacity 0.25s ease, stroke-width 0.15s ease; }
-  #canvas clipPath rect { transition: x 0.35s ease, y 0.35s ease, width 0.35s ease, height 0.35s ease; }
+  /* one glide for everything: same duration, same curve, camera included */
+  #canvas circle { transition: r 0.5s cubic-bezier(.3,.7,.25,1), cx 0.5s cubic-bezier(.3,.7,.25,1), cy 0.5s cubic-bezier(.3,.7,.25,1), stroke-opacity 0.12s ease, stroke-width 0.15s ease; }
+  #canvas clipPath rect { transition: x 0.5s cubic-bezier(.3,.7,.25,1), y 0.5s cubic-bezier(.3,.7,.25,1), width 0.5s cubic-bezier(.3,.7,.25,1), height 0.5s cubic-bezier(.3,.7,.25,1); }
   .no-anim #canvas circle, .no-anim #canvas clipPath rect { transition: none !important; }
+  @media (prefers-reduced-motion: reduce) {
+    #canvas circle, #canvas clipPath rect { transition: none !important; }
+  }
   #stageName { color: #cbb; letter-spacing: 0.06em; min-width: 7.5em; display: inline-block; }
   #hint { font-size: 0.85em; color: #999; margin: 8px 0 16px; }
   #savePanel { position: fixed; inset: 0; background: rgba(5,5,10,0.7); display: none; align-items: center; justify-content: center; }
@@ -217,7 +221,7 @@ function tweenView(cx, cy, half) {
   viewTarget = { cx, cy, half };
   if (viewAnim) cancelAnimationFrame(viewAnim);
   applyView();
-  const from = { ...view }, dur = 300, t0 = performance.now();
+  const from = { ...view }, dur = 500, t0 = performance.now();
   const ease = t => 1 - Math.pow(1 - t, 3);
   function step(now) {
     const t = Math.min((now - t0) / dur, 1), e = ease(t);
@@ -278,6 +282,8 @@ function reconcile() {
   }
 
   // appearing + persisting circles: new ones slide out from behind an existing circle
+  const newcomers = lattice.filter(([i, j]) => !circleEls.has(i + ',' + j)).length;
+  const appearStep = newcomers > 1 ? Math.min(400 / newcomers, 60) : 0; // the whole flight tells the order, however many come
   let appearIdx = 0;
   lattice.forEach(([i, j]) => {
     const key = i + ',' + j;
@@ -290,7 +296,7 @@ function reconcile() {
       const [x, y] = centerOf(i, j);
       el.setAttribute('stroke', '#ffffff');
       const parent = nearestExisting(x, y);
-      const delay = Math.min(appearIdx * 22, 440);
+      const delay = Math.round(appearIdx * appearStep);
       appearIdx++;
       if (parent) {
         // arrive from behind the nearest existing circle, already whole
@@ -313,9 +319,10 @@ function reconcile() {
         el.style.r = R + 'px';
       }
       circleEls.set(key, el);
-      setTimeout(() => { el.style.transitionDelay = ''; }, delay + 400);
+      setTimeout(() => { el.style.transitionDelay = ''; }, delay + 550);
     } else {
       const [x, y] = centerOf(i, j);
+      el.style.transition = '';      // release any withdrawal choreography
       el.style.cx = x.toFixed(2) + 'px';
       el.style.cy = y.toFixed(2) + 'px';
       el.style.r = R + 'px';
@@ -327,24 +334,35 @@ function reconcile() {
   });
   updateModeAvailability();
 
-  // withdrawing circles: slide back behind the nearest surviving circle
+  // withdrawing circles: unwind in reverse construction order, each gliding whole
+  // into the nearest surviving circle and melting only as it merges
+  const leaving = [];
   for (const [key, el] of circleEls) {
     if (targetKeys.has(key) || dying.has(key)) continue;
     const [pi, pj] = key.split(',').map(Number);
     const [x, y] = centerOf(pi, pj);
+    leaving.push({ key, el, x, y, dist: Math.hypot(x, y) });
+  }
+  leaving.sort((a, b) => b.dist - a.dist); // outermost first: the construction unwinds
+  const leaveStep = leaving.length > 1 ? Math.min(350 / leaving.length, 55) : 0;
+  const curve = 'cubic-bezier(.3,.7,.25,1)';
+  leaving.forEach(({ key, el, x, y }, rank) => {
     let home = null, homeD = Infinity;
     for (const [ti, tj] of lattice) {
       const [tx, ty] = centerOf(ti, tj);
       const d = Math.hypot(x - tx, y - ty);
       if (d < homeD) { homeD = d; home = [tx, ty]; }
     }
+    const d = Math.round(rank * leaveStep);
+    // travel the full 500ms visible; the fade occupies only the final stretch of the journey
+    el.style.transition = `r 0.5s ${curve} ${d}ms, cx 0.5s ${curve} ${d}ms, cy 0.5s ${curve} ${d}ms, stroke-opacity 0.22s ease ${d + 300}ms, stroke-width 0.15s ease`;
     if (home) { el.style.cx = home[0].toFixed(2) + 'px'; el.style.cy = home[1].toFixed(2) + 'px'; }
     else el.style.r = '0px';
     el.style.strokeOpacity = '0';
     dying.set(key, setTimeout(() => {
       el.remove(); circleEls.delete(key); dying.delete(key);
-    }, 420));
-  }
+    }, d + 560));
+  });
 }
 
 // ---------- serialize (pure, still geometry, no animation) ----------
