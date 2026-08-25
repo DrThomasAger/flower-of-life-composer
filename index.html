@@ -276,7 +276,7 @@ function reconcile() {
       el.style.r = R + 'px';
       el.style.strokeOpacity = ''; // revive if it was withdrawing
     }
-    el.setAttribute('stroke-width', (isHover ? m.stroke * 1.8 : m.stroke).toFixed(2));
+    el.setAttribute('stroke-width', m.stroke.toFixed(2));
     el.setAttribute('stroke-opacity', isRemoved
       ? (state.restoreMode ? (isHover ? 0.6 : 0.25) : (isHover ? 0.3 : 0))
       : (isHover ? 1 : 0.85));
