@@ -14,7 +14,7 @@
   button:hover { border-color: #999; }
   #stage { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; }
   svg#canvas { width: min(88vw, 72vh); height: min(88vw, 72vh); cursor: pointer; }
-  #canvas circle { transition: r 0.55s cubic-bezier(.22,.8,.35,1), stroke-opacity 0.4s ease, stroke-width 0.2s ease; }
+  #canvas circle { transition: r 0.55s cubic-bezier(.22,.8,.35,1), cx 0.65s cubic-bezier(.25,.7,.3,1), cy 0.65s cubic-bezier(.25,.7,.3,1), stroke-opacity 0.4s ease, stroke-width 0.2s ease; }
   .no-anim #canvas circle { transition: none !important; }
   #stageName { color: #cbb; letter-spacing: 0.06em; min-width: 7.5em; display: inline-block; }
   #hint { font-size: 0.85em; color: #999; margin: 8px 0 16px; }
@@ -207,7 +207,23 @@ function reconcile() {
     el.setAttribute('stroke-opacity', showB ? 0.85 : 0);
   }
 
-  // appearing + persisting circles
+  // circles already present before this change — the pattern the new ones emerge from
+  const existing = [];
+  for (const [key] of circleEls) {
+    if (dying.has(key)) continue;
+    const [pi, pj] = key.split(',').map(Number);
+    existing.push(centerOf(pi, pj));
+  }
+  function nearestExisting(x, y) {
+    let best = null, bestD = Infinity;
+    for (const [px, py] of existing) {
+      const d = Math.hypot(x - px, y - py);
+      if (d > 0.01 && d < bestD) { bestD = d; best = [px, py]; }
+    }
+    return best;
+  }
+
+  // appearing + persisting circles: new ones slide out from behind an existing circle
   let appearIdx = 0;
   lattice.forEach(([i, j]) => {
     const key = i + ',' + j;
@@ -218,31 +234,60 @@ function reconcile() {
     if (!el) {
       el = document.createElementNS(ns, 'circle');
       const [x, y] = centerOf(i, j);
-      el.setAttribute('cx', x.toFixed(2)); el.setAttribute('cy', y.toFixed(2));
       el.setAttribute('stroke', '#ffffff');
-      el.style.r = '0px';
-      patternG.appendChild(el);
-      circleEls.set(key, el);
+      const parent = nearestExisting(x, y);
       const delay = Math.min(appearIdx * 45, 900);
       appearIdx++;
-      void el.getBoundingClientRect(); // commit r=0 so the growth transitions
-      el.style.transitionDelay = delay + 'ms, 0ms, 0ms';
-      el.style.r = R + 'px';
-      setTimeout(() => { el.style.transitionDelay = ''; }, delay + 600);
+      if (parent) {
+        // arrive from behind the nearest existing circle, already whole
+        el.style.cx = parent[0].toFixed(2) + 'px';
+        el.style.cy = parent[1].toFixed(2) + 'px';
+        el.style.r = R + 'px';
+        patternG.insertBefore(el, patternG.firstChild); // behind the pattern it emerges from
+        void el.getBoundingClientRect();
+        el.style.transitionDelay = `0ms, ${delay}ms, ${delay}ms, 0ms, 0ms`;
+        el.style.cx = x.toFixed(2) + 'px';
+        el.style.cy = y.toFixed(2) + 'px';
+      } else {
+        // the first circle: grow into being
+        el.style.cx = x.toFixed(2) + 'px';
+        el.style.cy = y.toFixed(2) + 'px';
+        el.style.r = '0px';
+        patternG.appendChild(el);
+        void el.getBoundingClientRect();
+        el.style.transitionDelay = `${delay}ms, 0ms, 0ms, 0ms, 0ms`;
+        el.style.r = R + 'px';
+      }
+      circleEls.set(key, el);
+      setTimeout(() => { el.style.transitionDelay = ''; }, delay + 700);
     } else {
+      const [x, y] = centerOf(i, j);
+      el.style.cx = x.toFixed(2) + 'px';
+      el.style.cy = y.toFixed(2) + 'px';
       el.style.r = R + 'px';
+      el.style.strokeOpacity = ''; // revive if it was withdrawing
     }
     el.setAttribute('stroke-width', (isHover ? m.stroke * 1.8 : m.stroke).toFixed(2));
     el.setAttribute('stroke-opacity', isRemoved ? (isHover ? 0.35 : 0.12) : (isHover ? 1 : 0.85));
   });
 
-  // withdrawing circles
+  // withdrawing circles: slide back behind the nearest surviving circle
   for (const [key, el] of circleEls) {
     if (targetKeys.has(key) || dying.has(key)) continue;
-    el.style.r = '0px';
+    const [pi, pj] = key.split(',').map(Number);
+    const [x, y] = centerOf(pi, pj);
+    let home = null, homeD = Infinity;
+    for (const [ti, tj] of lattice) {
+      const [tx, ty] = centerOf(ti, tj);
+      const d = Math.hypot(x - tx, y - ty);
+      if (d < homeD) { homeD = d; home = [tx, ty]; }
+    }
+    if (home) { el.style.cx = home[0].toFixed(2) + 'px'; el.style.cy = home[1].toFixed(2) + 'px'; }
+    else el.style.r = '0px';
+    el.style.strokeOpacity = '0';
     dying.set(key, setTimeout(() => {
       el.remove(); circleEls.delete(key); dying.delete(key);
-    }, 650));
+    }, 700));
   }
 }
 
