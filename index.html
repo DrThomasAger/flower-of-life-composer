@@ -13,6 +13,13 @@
   button { background: #1c1c26; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 7px 16px; font-family: inherit; font-size: 0.95em; cursor: pointer; }
   button:hover { border-color: #999; }
   button.active { border-color: #cbb; background: #2a2438; }
+  .group { display: flex; gap: 14px; align-items: center; border: 1px solid #2c2c38; border-radius: 10px; padding: 14px 16px 10px; position: relative; }
+  .groupTitle { position: absolute; top: -9px; left: 12px; background: #0b0b0f; padding: 0 8px; font-size: 0.75em; letter-spacing: 0.14em; color: #998; text-transform: uppercase; }
+  #modeSwitch { display: inline-flex; border: 1px solid #444; border-radius: 8px; overflow: hidden; }
+  .segment { border: none; border-radius: 0; padding: 7px 18px; background: #1c1c26; }
+  .segment + .segment { border-left: 1px solid #444; }
+  .segment.active { background: #3a3050; color: #fff; }
+  #modeHint { font-size: 0.9em; color: #bba; margin: 2px 0 8px; min-height: 1.2em; }
   #growBtn { font-size: 1.25em; letter-spacing: 0.14em; padding: 14px 64px; margin: 12px 0 4px; border-radius: 10px; border-color: #666; }
   #stage { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; }
   svg#canvas { width: min(88vw, 72vh); height: min(88vw, 72vh); cursor: pointer; }
@@ -35,30 +42,44 @@
 <body>
 <h1>Flower of Life Composer</h1>
 <div id="controls">
-  <label>Frame
-    <select id="frame">
-      <option value="circle" selected>Circle</option>
-      <option value="square">Square</option>
-    </select>
-  </label>
-  <label id="growthWrap">Growth <input type="range" id="growth" min="0" max="12" step="1" value="0"> <span id="stageName">One Circle</span></label>
-  <label id="zoomWrap" class="hidden">Zoom <input type="range" id="zoom" min="1" max="6" step="1" value="2"> <span id="zoomVal">2</span></label>
-  <label>Weight
-    <select id="weight">
-      <option value="light">Light</option>
-      <option value="regular" selected>Regular</option>
-      <option value="bold">Bold</option>
-    </select>
-  </label>
-  <label id="boundaryWrap"><input type="checkbox" id="boundary" checked> Boundary rings</label>
-  <button id="revealMode">Reveal</button>
-  <button id="restoreMode">Show removed</button>
-  <button id="restoreAll">Restore all circles</button>
-  <button id="save">Save SVG</button>
+  <div class="group">
+    <div class="groupTitle">Pattern</div>
+    <label>Shape
+      <select id="frame">
+        <option value="circle" selected>Emblem &#9711;</option>
+        <option value="square">Tiling &#9638;</option>
+      </select>
+    </label>
+    <label id="growthWrap">Size <input type="range" id="growth" min="0" max="12" step="1" value="0"> <span id="stageName">One Circle</span></label>
+    <label id="zoomWrap" class="hidden">Zoom <input type="range" id="zoom" min="1" max="6" step="1" value="2"> <span id="zoomVal">2</span></label>
+    <label>Line thickness
+      <select id="weight">
+        <option value="light">Thin</option>
+        <option value="regular" selected>Medium</option>
+        <option value="bold">Thick</option>
+      </select>
+    </label>
+    <label id="boundaryWrap"><input type="checkbox" id="boundary" checked> Outer border</label>
+  </div>
+  <div class="group">
+    <div class="groupTitle">Editing</div>
+    <div id="modeSwitch">
+      <button id="modeErase" class="segment active">Erase</button>
+      <button id="modePaint" class="segment">Paint</button>
+      <button id="modeRepair" class="segment">Repair</button>
+    </div>
+    <button id="undoBtn">Undo</button>
+    <button id="restoreAll">Bring everything back</button>
+  </div>
+  <div class="group">
+    <div class="groupTitle">Save</div>
+    <button id="save">Save as image (SVG)</button>
+  </div>
 </div>
+<div id="modeHint">Click a circle to remove it &middot; click an empty place to bring it back</div>
 <div id="stage"><svg id="canvas" xmlns="http://www.w3.org/2000/svg"></svg></div>
-<button id="growBtn">Grow</button>
-<div id="hint">Hover shows which circle you'll touch &middot; click removes it &middot; hover an empty place and click to restore &middot; Ctrl+Z undoes &middot; &larr; shrinks, &rarr; grows</div>
+<button id="growBtn">Add next circle</button>
+<div id="hint">&larr; smaller &middot; &rarr; bigger &middot; Ctrl+Z undoes</div>
 
 <div id="savePanel">
   <div id="saveCard">
@@ -359,17 +380,13 @@ svg.addEventListener('click', (ev) => {
   if (!k) return;
   if (state.removed.has(k)) { state.removed.delete(k); history.push({ key: k, action: 'restore' }); }
   else if (!state.restoreMode && !state.revealMode) { state.removed.add(k); history.push({ key: k, action: 'remove' }); }
-  if (state.restoreMode && state.removed.size === 0) setRestoreMode(false); // all returned: the mode completes itself
+  if (state.restoreMode && state.removed.size === 0) setMode('erase'); // all returned: the mode completes itself
   reconcile();
 });
 document.addEventListener('keydown', (ev) => {
   if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') {
     ev.preventDefault();
-    const last = history.pop();
-    if (!last) return;
-    if (last.action === 'remove') state.removed.delete(last.key);
-    else state.removed.add(last.key);
-    reconcile();
+    undoOnce();
   }
 });
 
@@ -383,6 +400,7 @@ document.getElementById('frame').addEventListener('change', (ev) => {
   growthWrap.classList.toggle('hidden', sq);
   zoomWrap.classList.toggle('hidden', !sq);
   boundaryWrap.classList.toggle('hidden', sq);
+  document.getElementById('growBtn').textContent = sq ? 'Zoom in' : 'Add next circle';
   reconcile();
 });
 document.getElementById('growth').addEventListener('input', (ev) => {
@@ -397,42 +415,45 @@ document.getElementById('zoom').addEventListener('input', (ev) => {
 });
 document.getElementById('weight').addEventListener('change', (ev) => { state.weight = ev.target.value; reconcile(); });
 document.getElementById('boundary').addEventListener('change', (ev) => { state.boundary = ev.target.checked; reconcile(); });
-const revealModeBtn = document.getElementById('revealMode');
-function setRevealMode(on) {
-  state.revealMode = on;
-  revealModeBtn.classList.toggle('active', on);
-  revealModeBtn.textContent = on ? 'Revealing…' : 'Reveal';
+// editing modes: one three-way switch, always saying what a click does right now
+const MODE_HINTS = {
+  erase: 'Click a circle to remove it · click an empty place to bring it back',
+  paint: 'The canvas is emptied — click to add circles one by one; added circles stay',
+  repair: 'Everything removed is shown faintly — click one to bring it back',
+};
+const modeButtons = { erase: document.getElementById('modeErase'), paint: document.getElementById('modePaint'), repair: document.getElementById('modeRepair') };
+function setMode(mode) {
+  state.revealMode = mode === 'paint';
+  state.restoreMode = mode === 'repair';
+  for (const [name, btn] of Object.entries(modeButtons)) btn.classList.toggle('active', name === mode);
+  document.getElementById('modeHint').textContent = MODE_HINTS[mode];
 }
-revealModeBtn.addEventListener('click', () => {
-  if (!state.revealMode) {
-    if (state.restoreMode) setRestoreMode(false);
-    for (const [i, j] of currentLattice(state)) {   // empty the canvas: everything becomes absence
-      const key = i + ',' + j;
-      if (!state.removed.has(key)) { state.removed.add(key); history.push({ key, action: 'remove' }); }
-    }
-    setRevealMode(true);
-  } else {
-    setRevealMode(false);   // keep what has been revealed, return to normal composing
+modeButtons.erase.addEventListener('click', () => { setMode('erase'); reconcile(); });
+modeButtons.paint.addEventListener('click', () => {
+  for (const [i, j] of currentLattice(state)) {   // empty the canvas: everything becomes absence
+    const key = i + ',' + j;
+    if (!state.removed.has(key)) { state.removed.add(key); history.push({ key, action: 'remove' }); }
   }
+  setMode('paint');
   reconcile();
 });
-const restoreModeBtn = document.getElementById('restoreMode');
-function setRestoreMode(on) {
-  state.restoreMode = on;
-  restoreModeBtn.classList.toggle('active', on);
-  restoreModeBtn.textContent = on ? 'Showing removed…' : 'Show removed';
+modeButtons.repair.addEventListener('click', () => {
+  if (state.removed.size === 0) return; // nothing is absent
+  setMode('repair');
+  reconcile();
+});
+function undoOnce() {
+  const last = history.pop();
+  if (!last) return;
+  if (last.action === 'remove') state.removed.delete(last.key);
+  else state.removed.add(last.key);
+  reconcile();
 }
-restoreModeBtn.addEventListener('click', () => {
-  if (!state.restoreMode && state.removed.size === 0) return; // nothing is absent
-  if (state.revealMode) setRevealMode(false);
-  setRestoreMode(!state.restoreMode);
-  reconcile();
-});
+document.getElementById('undoBtn').addEventListener('click', undoOnce);
 document.getElementById('restoreAll').addEventListener('click', () => {
   for (const k of state.removed) history.push({ key: k, action: 'restore' });
   state.removed.clear();
-  if (state.restoreMode) setRestoreMode(false);
-  if (state.revealMode) setRevealMode(false);
+  setMode('erase');
   reconcile();
 });
 
@@ -484,6 +505,7 @@ if (params.has('frame') && params.get('frame') === 'square') {
   document.getElementById('frame').value = 'square';
   growthWrap.classList.add('hidden'); boundaryWrap.classList.add('hidden');
   zoomWrap.classList.remove('hidden');
+  document.getElementById('growBtn').textContent = 'Zoom in';
 }
 
 // begin at one circle (or ?growth=N), ready to grow by hand
