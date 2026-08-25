@@ -31,7 +31,10 @@
   .no-anim #canvas circle, .no-anim #canvas clipPath rect { transition: none !important; }
   @media (prefers-reduced-motion: reduce) {
     #canvas circle, #canvas clipPath rect { transition: none !important; }
+    .eyeGlow { animation-duration: 0.01s !important; }
   }
+  .eyeGlow { opacity: 0; animation: eyeGlow 1.6s ease-out forwards; filter: drop-shadow(0 0 14px #f0c24b); pointer-events: none; }
+  @keyframes eyeGlow { 0% { opacity: 0; } 22% { opacity: 0.85; } 100% { opacity: 0; } }
   #stageName { color: #cbb; letter-spacing: 0.06em; min-width: 7.5em; display: inline-block; }
   #hint { font-size: 0.85em; color: #999; margin: 8px 0 16px; }
   #savePanel { position: fixed; inset: 0; background: rgba(5,5,10,0.7); display: none; align-items: center; justify-content: center; }
@@ -409,6 +412,32 @@ function restyleKey(key) {
 function updateModeAvailability() {
   modeButtons.repair.disabled = state.removed.size === 0 && !state.restoreMode;
 }
+// the gold flush of a completed eye: the vesica lens between two neighboring circles
+const NEIGHBOR_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]];
+function glowEye(ax, ay, bx, by) {
+  const mx = (ax + bx) / 2, my = (ay + by) / 2;
+  const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy);
+  const ux = -dy / len, uy = dx / len, h = Math.sqrt(Math.max(R * R - (len / 2) ** 2, 0));
+  const p1 = [mx + ux * h, my + uy * h], p2 = [mx - ux * h, my - uy * h];
+  const p = document.createElementNS(ns, 'path');
+  p.setAttribute('d', `M ${p1[0].toFixed(2)} ${p1[1].toFixed(2)} A ${R} ${R} 0 0 1 ${p2[0].toFixed(2)} ${p2[1].toFixed(2)} A ${R} ${R} 0 0 1 ${p1[0].toFixed(2)} ${p1[1].toFixed(2)} Z`);
+  p.setAttribute('fill', '#f0c24b');
+  p.setAttribute('stroke', 'none');
+  p.setAttribute('class', 'eyeGlow');
+  patternG.appendChild(p);
+  setTimeout(() => p.remove(), 1700);
+}
+function glowCompletedEyes(key) {
+  const [i, j] = key.split(',').map(Number);
+  const inLattice = new Set(currentLattice(state).map(([a, b]) => a + ',' + b));
+  const [x, y] = centerOf(i, j);
+  for (const [di, dj] of NEIGHBOR_DIRS) {
+    const nk = (i + di) + ',' + (j + dj);
+    if (!inLattice.has(nk) || state.removed.has(nk)) continue;
+    const [nx, ny] = centerOf(i + di, j + dj);
+    glowEye(x, y, nx, ny);
+  }
+}
 function nearestKey(ev) {
   const pt = svg.createSVGPoint();
   pt.x = ev.clientX; pt.y = ev.clientY;
@@ -441,7 +470,11 @@ svg.addEventListener('mouseleave', () => {
 svg.addEventListener('click', (ev) => {
   const k = nearestKey(ev);
   if (!k) return;
-  if (state.removed.has(k)) { state.removed.delete(k); history.push({ key: k, action: 'restore' }); }
+  if (state.removed.has(k)) {
+    state.removed.delete(k);
+    history.push({ key: k, action: 'restore' });
+    if (state.revealMode) glowCompletedEyes(k); // painting a circle: every eye it completes flushes gold
+  }
   else if (!state.restoreMode && !state.revealMode) { state.removed.add(k); history.push({ key: k, action: 'remove' }); }
   if (state.restoreMode && state.removed.size === 0) setMode('erase'); // all returned: the mode completes itself
   reconcile();
