@@ -157,11 +157,21 @@ function metrics(st) {
     const stroke = Math.max(Math.max(half, 250) * WEIGHTS[st.weight], 3);
     return { mode: 'square', half, cx: 0, cy: 0, stroke, viewHalf: half };
   }
+  if (st.growth <= 6) {
+    // construction stages: no enclosure, the frame centers on the figure drawn so far (as in the classical step images)
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const [i, j] of [[0, 0]].concat(RING_ORDER.slice(0, st.growth))) {
+      const [x, y] = centerOf(i, j);
+      minX = Math.min(minX, x - R); maxX = Math.max(maxX, x + R);
+      minY = Math.min(minY, y - R); maxY = Math.max(maxY, y + R);
+    }
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    const half = Math.max(maxX - minX, maxY - minY) / 2 + 14;
+    const stroke = Math.max(Math.max(half, 250) * WEIGHTS[st.weight], 3);
+    return { mode: 'circle', construction: true, clipR: 4000, cx, cy, stroke, gap: 0, outerR: 0, viewHalf: half + stroke * 2 };
+  }
   let clipR, cx = 0, cy = 0;
-  if (st.growth === 0) clipR = R;
-  else if (st.growth === 1) { clipR = 1.5 * R; cy = R / 2; }
-  else if (st.growth <= 6) clipR = 2 * R;          // construction and seed: circles whole
-  else if (st.growth === 7) clipR = 3 * R;         // flower of life: nineteen whole circles
+  if (st.growth === 7) clipR = 3 * R;              // flower of life: nineteen whole circles
   else clipR = (st.growth - 5) * R;                // full flower onward: boundary arcs begin
   const stroke = Math.max(Math.max(clipR, 250) * WEIGHTS[st.weight], 3);
   const gap = stroke * 3;
@@ -237,7 +247,7 @@ function reconcile() {
   }
 
   // boundary rings (circle frame only)
-  const showB = m.mode === 'circle' && state.boundary;
+  const showB = m.mode === 'circle' && state.boundary && !m.construction;
   for (const [el, rr] of [[bInner, showB ? m.clipR + m.stroke / 2 : 0], [bOuter, showB ? m.outerR : 0]]) {
     el.setAttribute('cx', m.cx);
     el.setAttribute('cy', m.cy);
@@ -341,16 +351,18 @@ function serialize(st, variant) {
   lines.push('<?xml version="1.0" encoding="UTF-8"?>');
   lines.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${(cx - half).toFixed(1)} ${(cy - half).toFixed(1)} ${(2 * half).toFixed(1)} ${(2 * half).toFixed(1)}">`);
   if (variant === 'ground') lines.push(`  <rect x="${(cx - half).toFixed(1)}" y="${(cy - half).toFixed(1)}" width="${(2 * half).toFixed(1)}" height="${(2 * half).toFixed(1)}" fill="#000000"/>`);
-  if (m.mode === 'circle') lines.push(`  <defs><clipPath id="${clipId}"><circle cx="${m.cx}" cy="${m.cy}" r="${m.clipR}"/></clipPath></defs>`);
-  else lines.push(`  <defs><clipPath id="${clipId}"><rect x="${-m.half}" y="${-m.half}" width="${2 * m.half}" height="${2 * m.half}"/></clipPath></defs>`);
-  lines.push(`  <g clip-path="url(#${clipId})" fill="none" stroke="${color}" stroke-width="${m.stroke.toFixed(2)}">`);
+  if (m.mode === 'circle' && !m.construction) lines.push(`  <defs><clipPath id="${clipId}"><circle cx="${m.cx}" cy="${m.cy}" r="${m.clipR}"/></clipPath></defs>`);
+  else if (m.mode === 'square') lines.push(`  <defs><clipPath id="${clipId}"><rect x="${-m.half}" y="${-m.half}" width="${2 * m.half}" height="${2 * m.half}"/></clipPath></defs>`);
+  lines.push(m.construction
+    ? `  <g fill="none" stroke="${color}" stroke-width="${m.stroke.toFixed(2)}">`
+    : `  <g clip-path="url(#${clipId})" fill="none" stroke="${color}" stroke-width="${m.stroke.toFixed(2)}">`);
   for (const [i, j] of currentLattice(st)) {
     if (st.removed.has(i + ',' + j)) continue;
     const [x, y] = centerOf(i, j);
     lines.push(`    <circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${R}"/>`);
   }
   lines.push('  </g>');
-  if (m.mode === 'circle' && st.boundary) {
+  if (m.mode === 'circle' && st.boundary && !m.construction) {
     lines.push(`  <circle cx="${m.cx}" cy="${m.cy}" r="${(m.clipR + m.stroke / 2).toFixed(2)}" fill="none" stroke="${color}" stroke-width="${m.stroke.toFixed(2)}"/>`);
     lines.push(`  <circle cx="${m.cx}" cy="${m.cy}" r="${m.outerR.toFixed(2)}" fill="none" stroke="${color}" stroke-width="${m.stroke.toFixed(2)}"/>`);
   }
