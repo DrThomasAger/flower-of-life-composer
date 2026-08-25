@@ -24,7 +24,7 @@
   #modeHint { font-size: 0.9em; color: #bba; margin: 2px 0 8px; min-height: 1.2em; }
   #growBtn { font-size: 1.25em; letter-spacing: 0.14em; padding: 14px 64px; margin: 12px 0 4px; border-radius: 10px; border-color: #666; }
   #stage { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; }
-  svg#canvas { width: min(88vw, 72vh); height: min(88vw, 72vh); cursor: pointer; }
+  svg#canvas { width: min(88vw, 72vh); height: min(88vw, 72vh); cursor: default; }
   /* one glide for everything: same duration, same curve, camera included */
   #canvas circle { transition: r 0.5s cubic-bezier(.3,.7,.25,1), cx 0.5s cubic-bezier(.3,.7,.25,1), cy 0.5s cubic-bezier(.3,.7,.25,1), stroke-opacity 0.12s ease, stroke-width 0.15s ease; }
   #canvas clipPath rect { transition: x 0.5s cubic-bezier(.3,.7,.25,1), y 0.5s cubic-bezier(.3,.7,.25,1), width 0.5s cubic-bezier(.3,.7,.25,1), height 0.5s cubic-bezier(.3,.7,.25,1); }
@@ -402,7 +402,7 @@ function serialize(st, variant) {
 function opacityFor(key) {
   const removed = state.removed.has(key), hover = key === hoverKey;
   if (state.restoreMode) return removed ? (hover ? 0.7 : 0.3) : 0.35;  // the pattern recedes, absences step forward
-  if (state.revealMode) return removed ? (hover ? 0.4 : 0) : 1;        // what you have painted stands solid
+  if (state.revealMode) return removed ? (hover ? 0.55 : 0) : 1;       // hover shows plainly the circle about to appear
   return removed ? (hover ? 0.3 : 0) : (hover ? 0.65 : 1);             // solid at rest; hover softens the one you'd touch
 }
 function restyleKey(key) {
@@ -450,11 +450,14 @@ function nearestKey(ev) {
     const d = Math.hypot(p.x - x, p.y - y);
     if (d < bestD) { bestD = d; best = key; }
   }
-  return bestD <= R * 0.55 ? best : null;
+  // in Paint and Repair the reach is generous: no dead zones between settled circles
+  const reach = (state.restoreMode || state.revealMode) ? R * 0.9 : R * 0.55;
+  return bestD <= reach ? best : null;
 }
 
 svg.addEventListener('mousemove', (ev) => {
   const k = nearestKey(ev);
+  svg.style.cursor = k ? 'pointer' : 'default'; // the hand appears only where a click means something
   if (k === hoverKey) return;
   const prev = hoverKey;
   hoverKey = k;
