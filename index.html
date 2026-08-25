@@ -6,13 +6,17 @@
 <style>
   body { margin: 0; background: #0b0b0f; color: #eee; font-family: Georgia, serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
   h1 { font-weight: normal; font-size: 1.3em; letter-spacing: 0.12em; margin: 18px 0 6px; }
-  #controls { display: flex; gap: 22px; align-items: center; margin: 10px 0 14px; flex-wrap: wrap; justify-content: center; }
+  #controls { display: flex; gap: 20px; align-items: center; margin: 10px 0 14px; flex-wrap: wrap; justify-content: center; }
   label { font-size: 0.95em; }
   input[type=range] { vertical-align: middle; }
+  select { vertical-align: middle; }
   button { background: #1c1c26; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 7px 16px; font-family: inherit; font-size: 0.95em; cursor: pointer; }
   button:hover { border-color: #999; }
-  #stage { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; position: relative; }
-  svg#canvas { max-width: min(88vw, 74vh); max-height: 74vh; cursor: pointer; }
+  #stage { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; }
+  svg#canvas { width: min(88vw, 72vh); height: min(88vw, 72vh); cursor: pointer; }
+  #canvas circle { transition: r 0.55s cubic-bezier(.22,.8,.35,1), stroke-opacity 0.4s ease, stroke-width 0.2s ease; }
+  .no-anim #canvas circle { transition: none !important; }
+  #stageName { color: #cbb; letter-spacing: 0.06em; min-width: 7.5em; display: inline-block; }
   #hint { font-size: 0.85em; color: #999; margin: 8px 0 16px; }
   #savePanel { position: fixed; inset: 0; background: rgba(5,5,10,0.7); display: none; align-items: center; justify-content: center; }
   #savePanel.open { display: flex; }
@@ -22,12 +26,20 @@
   legend { font-size: 0.85em; color: #aaa; padding: 0 6px; }
   fieldset label { display: block; margin: 4px 0; cursor: pointer; }
   #saveActions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 6px; }
+  .hidden { display: none !important; }
 </style>
 </head>
 <body>
 <h1>Flower of Life Composer</h1>
 <div id="controls">
-  <label>Rings <input type="range" id="rings" min="1" max="7" step="1" value="3"> <span id="ringsVal">3</span></label>
+  <label>Frame
+    <select id="frame">
+      <option value="circle" selected>Circle</option>
+      <option value="square">Square</option>
+    </select>
+  </label>
+  <label id="growthWrap">Growth <input type="range" id="growth" min="0" max="8" step="1" value="4"> <span id="stageName">Full Flower</span></label>
+  <label id="zoomWrap" class="hidden">Zoom <input type="range" id="zoom" min="1" max="6" step="1" value="2"> <span id="zoomVal">2</span></label>
   <label>Weight
     <select id="weight">
       <option value="light">Light</option>
@@ -35,7 +47,7 @@
       <option value="bold">Bold</option>
     </select>
   </label>
-  <label><input type="checkbox" id="boundary" checked> Boundary rings</label>
+  <label id="boundaryWrap"><input type="checkbox" id="boundary" checked> Boundary rings</label>
   <button id="restoreAll">Restore all circles</button>
   <button id="save">Save SVG</button>
 </div>
@@ -62,18 +74,21 @@
 // ---------- model ----------
 const R = 100;
 const S = Math.sqrt(3) / 2 * R;
-const WEIGHTS = { light: 0.008, regular: 0.014, bold: 0.024 }; // stroke as ratio of clip radius
+const WEIGHTS = { light: 0.008, regular: 0.014, bold: 0.024 };
+const STAGE_NAMES = ['One Circle', 'Vesica Piscis', 'Seed of Life', 'Flower of Life', 'Full Flower', 'Five Rings', 'Six Rings', 'Seven Rings', 'Eight Rings'];
 const state = {
-  rings: 3,
-  removed: new Set(),   // "i,j" keys, kept indefinitely as durable intent
+  frame: 'circle',      // 'circle' | 'square'
+  growth: 4,            // 0 one circle, 1 vesica piscis, 2 seed, 3 flower(19), 4 full flower, then outward
+  zoom: 2,              // square frame: half-width = zoom * R * 1.5
+  removed: new Set(),   // "i,j" keys, durable intent
   boundary: true,
   weight: 'regular',
 };
-const history = [];      // { key, action: 'remove' | 'restore' }
+const history = [];
 let hoverKey = null;
 let exportCounter = 0;
 
-function latticePoints(rings) {
+function hexLattice(rings) {
   const pts = [];
   const maxK = rings * rings;
   for (let i = -rings; i <= rings; i++)
@@ -82,83 +97,177 @@ function latticePoints(rings) {
   return pts;
 }
 function centerOf(i, j) { return [i * R + j * R / 2, j * S]; }
-function metrics(st) {
-  const clipR = st.rings * R;
-  const stroke = Math.max(clipR * WEIGHTS[st.weight], 1);
-  const gap = stroke * 3;                       // boundary separation, stroke-relative
-  const outerR = clipR + gap + stroke;          // second boundary ring
-  const half = (st.boundary ? outerR : clipR) + stroke * 2 + 6;
-  return { clipR, stroke, gap, outerR, half };
+
+function currentLattice(st) {
+  let pts;
+  if (st.frame === 'square') {
+    const half = st.zoom * R * 1.5;
+    pts = [];
+    const range = Math.ceil((half + R) / S) + 2;
+    for (let i = -2 * range; i <= 2 * range; i++)
+      for (let j = -range; j <= range; j++) {
+        const [x, y] = centerOf(i, j);
+        if (Math.abs(x) <= half + R && Math.abs(y) <= half + R) pts.push([i, j]);
+      }
+  } else if (st.growth === 0) pts = [[0, 0]];
+  else if (st.growth === 1) pts = [[0, 0], [1, 0]];
+  else pts = hexLattice(st.growth - 1);
+  // construction order: distance from origin, then angle
+  return pts.sort((a, b) => {
+    const [ax, ay] = centerOf(a[0], a[1]), [bx, by] = centerOf(b[0], b[1]);
+    const da = Math.hypot(ax, ay), db = Math.hypot(bx, by);
+    return (da - db) || (Math.atan2(ay, ax) - Math.atan2(by, bx));
+  });
 }
 
-// ---------- render (screen only: ghosts + hover live here, never in export) ----------
+function metrics(st) {
+  if (st.frame === 'square') {
+    const half = st.zoom * R * 1.5;
+    const stroke = Math.max(Math.max(half, 250) * WEIGHTS[st.weight], 3);
+    return { mode: 'square', half, cx: 0, cy: 0, stroke, viewHalf: half };
+  }
+  let clipR, cx = 0, cy = 0;
+  if (st.growth === 0) clipR = R;
+  else if (st.growth === 1) { clipR = 1.5 * R; cx = R / 2; }
+  else clipR = (st.growth - 1) * R;
+  const stroke = Math.max(Math.max(clipR, 250) * WEIGHTS[st.weight], 3);
+  const gap = stroke * 3;
+  const outerR = clipR + gap + stroke;
+  const viewHalf = (st.boundary ? outerR : clipR) + stroke * 2 + 6;
+  return { mode: 'circle', clipR, cx, cy, stroke, gap, outerR, viewHalf };
+}
+
+// ---------- render: persistent elements, animated reconciliation ----------
 const svg = document.getElementById('canvas');
 const ns = 'http://www.w3.org/2000/svg';
+const circleEls = new Map();   // key -> element (pattern circles)
+let dying = new Map();         // key -> removal timer
 
-function render() {
+// static scaffolding
+svg.innerHTML = `
+  <rect x="-4000" y="-4000" width="8000" height="8000" fill="#000000"/>
+  <defs>
+    <clipPath id="clipCircle"><circle cx="0" cy="0" r="300"/></clipPath>
+    <clipPath id="clipSquare"><rect x="-300" y="-300" width="600" height="600"/></clipPath>
+  </defs>
+  <g id="pattern" fill="none"></g>
+  <circle id="bInner" cx="0" cy="0" r="0" fill="none" stroke="#ffffff" stroke-opacity="0"/>
+  <circle id="bOuter" cx="0" cy="0" r="0" fill="none" stroke="#ffffff" stroke-opacity="0"/>`;
+const patternG = document.getElementById('pattern');
+const clipCircleEl = document.querySelector('#clipCircle circle');
+const clipSquareEl = document.querySelector('#clipSquare rect');
+const bInner = document.getElementById('bInner');
+const bOuter = document.getElementById('bOuter');
+
+// viewBox tween
+let view = { cx: 0, half: 400 };
+let viewAnim = null;
+function applyView() {
+  svg.setAttribute('viewBox', `${(view.cx - view.half).toFixed(1)} ${(-view.half).toFixed(1)} ${(2 * view.half).toFixed(1)} ${(2 * view.half).toFixed(1)}`);
+}
+function tweenView(cx, half) {
+  if (viewAnim) cancelAnimationFrame(viewAnim);
+  applyView();
+  const from = { ...view }, dur = 450, t0 = performance.now();
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  function step(now) {
+    const t = Math.min((now - t0) / dur, 1), e = ease(t);
+    view.cx = from.cx + (cx - from.cx) * e;
+    view.half = from.half + (half - from.half) * e;
+    svg.setAttribute('viewBox', `${(view.cx - view.half).toFixed(1)} ${(-view.half).toFixed(1)} ${(2 * view.half).toFixed(1)} ${(2 * view.half).toFixed(1)}`);
+    if (t < 1) viewAnim = requestAnimationFrame(step);
+  }
+  viewAnim = requestAnimationFrame(step);
+}
+
+function reconcile() {
   const m = metrics(state);
-  svg.setAttribute('viewBox', `${-m.half} ${-m.half} ${2 * m.half} ${2 * m.half}`);
-  svg.innerHTML = '';
+  const lattice = currentLattice(state);
+  const targetKeys = new Set(lattice.map(([i, j]) => i + ',' + j));
 
-  const bg = document.createElementNS(ns, 'rect');
-  bg.setAttribute('x', -m.half); bg.setAttribute('y', -m.half);
-  bg.setAttribute('width', 2 * m.half); bg.setAttribute('height', 2 * m.half);
-  bg.setAttribute('fill', '#000000');
-  svg.appendChild(bg);
+  tweenView(m.cx, m.viewHalf);
 
-  const defs = document.createElementNS(ns, 'defs');
-  defs.innerHTML = `<clipPath id="screenClip"><circle cx="0" cy="0" r="${m.clipR}"/></clipPath>`;
-  svg.appendChild(defs);
+  // clip
+  if (m.mode === 'circle') {
+    clipCircleEl.setAttribute('cx', m.cx);
+    clipCircleEl.style.r = m.clipR + 'px';
+    patternG.setAttribute('clip-path', 'url(#clipCircle)');
+  } else {
+    clipSquareEl.setAttribute('x', -m.half); clipSquareEl.setAttribute('y', -m.half);
+    clipSquareEl.setAttribute('width', 2 * m.half); clipSquareEl.setAttribute('height', 2 * m.half);
+    patternG.setAttribute('clip-path', 'url(#clipSquare)');
+  }
 
-  const g = document.createElementNS(ns, 'g');
-  g.setAttribute('clip-path', 'url(#screenClip)');
-  g.setAttribute('fill', 'none');
-  for (const [i, j] of latticePoints(state.rings)) {
+  // boundary rings (circle frame only)
+  const showB = m.mode === 'circle' && state.boundary;
+  for (const [el, rr] of [[bInner, showB ? m.clipR + m.stroke / 2 : 0], [bOuter, showB ? m.outerR : 0]]) {
+    el.setAttribute('cx', m.cx);
+    el.style.r = Math.max(rr, 0) + 'px';
+    el.setAttribute('stroke-width', m.stroke.toFixed(2));
+    el.setAttribute('stroke-opacity', showB ? 0.85 : 0);
+  }
+
+  // appearing + persisting circles
+  let appearIdx = 0;
+  lattice.forEach(([i, j]) => {
     const key = i + ',' + j;
-    const [x, y] = centerOf(i, j);
-    const c = document.createElementNS(ns, 'circle');
-    c.setAttribute('cx', x.toFixed(2)); c.setAttribute('cy', y.toFixed(2)); c.setAttribute('r', R);
+    let el = circleEls.get(key);
     const isRemoved = state.removed.has(key);
     const isHover = key === hoverKey;
-    c.setAttribute('stroke', '#ffffff');
-    c.setAttribute('stroke-width', (isHover ? m.stroke * 1.8 : m.stroke).toFixed(2));
-    c.setAttribute('stroke-opacity', isRemoved ? (isHover ? 0.35 : 0.12) : (isHover ? 1 : 0.85));
-    g.appendChild(c);
-  }
-  svg.appendChild(g);
-
-  if (state.boundary) {
-    for (const rr of [m.clipR + m.stroke / 2, m.outerR]) {
-      const c = document.createElementNS(ns, 'circle');
-      c.setAttribute('cx', 0); c.setAttribute('cy', 0); c.setAttribute('r', rr.toFixed(2));
-      c.setAttribute('fill', 'none'); c.setAttribute('stroke', '#ffffff');
-      c.setAttribute('stroke-width', m.stroke.toFixed(2));
-      c.setAttribute('stroke-opacity', 0.85);
-      svg.appendChild(c);
+    if (dying.has(key)) { clearTimeout(dying.get(key)); dying.delete(key); }
+    if (!el) {
+      el = document.createElementNS(ns, 'circle');
+      const [x, y] = centerOf(i, j);
+      el.setAttribute('cx', x.toFixed(2)); el.setAttribute('cy', y.toFixed(2));
+      el.setAttribute('stroke', '#ffffff');
+      el.style.r = '0px';
+      patternG.appendChild(el);
+      circleEls.set(key, el);
+      const delay = Math.min(appearIdx * 45, 900);
+      appearIdx++;
+      void el.getBoundingClientRect(); // commit r=0 so the growth transitions
+      el.style.transitionDelay = delay + 'ms, 0ms, 0ms';
+      el.style.r = R + 'px';
+      setTimeout(() => { el.style.transitionDelay = ''; }, delay + 600);
+    } else {
+      el.style.r = R + 'px';
     }
+    el.setAttribute('stroke-width', (isHover ? m.stroke * 1.8 : m.stroke).toFixed(2));
+    el.setAttribute('stroke-opacity', isRemoved ? (isHover ? 0.35 : 0.12) : (isHover ? 1 : 0.85));
+  });
+
+  // withdrawing circles
+  for (const [key, el] of circleEls) {
+    if (targetKeys.has(key) || dying.has(key)) continue;
+    el.style.r = '0px';
+    dying.set(key, setTimeout(() => {
+      el.remove(); circleEls.delete(key); dying.delete(key);
+    }, 650));
   }
 }
 
-// ---------- serialize (pure, deterministic, no DOM) ----------
+// ---------- serialize (pure, still geometry, no animation) ----------
 function serialize(st, variant) {
   const m = metrics(st);
   const color = variant === 'positive' ? '#111111' : '#ffffff';
-  const clipId = `fol-clip-${st.rings}-${st.weight}-${++exportCounter}`;
+  const clipId = `fol-clip-${++exportCounter}`;
+  const half = m.viewHalf, cx = m.cx;
   const lines = [];
   lines.push('<?xml version="1.0" encoding="UTF-8"?>');
-  lines.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-m.half} ${-m.half} ${2 * m.half} ${2 * m.half}">`);
-  if (variant === 'ground') lines.push(`  <rect x="${-m.half}" y="${-m.half}" width="${2 * m.half}" height="${2 * m.half}" fill="#000000"/>`);
-  lines.push(`  <defs><clipPath id="${clipId}"><circle cx="0" cy="0" r="${m.clipR}"/></clipPath></defs>`);
+  lines.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${(cx - half).toFixed(1)} ${(-half).toFixed(1)} ${(2 * half).toFixed(1)} ${(2 * half).toFixed(1)}">`);
+  if (variant === 'ground') lines.push(`  <rect x="${(cx - half).toFixed(1)}" y="${(-half).toFixed(1)}" width="${(2 * half).toFixed(1)}" height="${(2 * half).toFixed(1)}" fill="#000000"/>`);
+  if (m.mode === 'circle') lines.push(`  <defs><clipPath id="${clipId}"><circle cx="${m.cx}" cy="0" r="${m.clipR}"/></clipPath></defs>`);
+  else lines.push(`  <defs><clipPath id="${clipId}"><rect x="${-m.half}" y="${-m.half}" width="${2 * m.half}" height="${2 * m.half}"/></clipPath></defs>`);
   lines.push(`  <g clip-path="url(#${clipId})" fill="none" stroke="${color}" stroke-width="${m.stroke.toFixed(2)}">`);
-  for (const [i, j] of latticePoints(st.rings)) {
-    if (st.removed.has(i + ',' + j)) continue;   // removals outside current radius simply never appear
+  for (const [i, j] of currentLattice(st)) {
+    if (st.removed.has(i + ',' + j)) continue;
     const [x, y] = centerOf(i, j);
     lines.push(`    <circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${R}"/>`);
   }
   lines.push('  </g>');
-  if (st.boundary) {
-    lines.push(`  <circle cx="0" cy="0" r="${(m.clipR + m.stroke / 2).toFixed(2)}" fill="none" stroke="${color}" stroke-width="${m.stroke.toFixed(2)}"/>`);
-    lines.push(`  <circle cx="0" cy="0" r="${m.outerR.toFixed(2)}" fill="none" stroke="${color}" stroke-width="${m.stroke.toFixed(2)}"/>`);
+  if (m.mode === 'circle' && st.boundary) {
+    lines.push(`  <circle cx="${m.cx}" cy="0" r="${(m.clipR + m.stroke / 2).toFixed(2)}" fill="none" stroke="${color}" stroke-width="${m.stroke.toFixed(2)}"/>`);
+    lines.push(`  <circle cx="${m.cx}" cy="0" r="${m.outerR.toFixed(2)}" fill="none" stroke="${color}" stroke-width="${m.stroke.toFixed(2)}"/>`);
   }
   lines.push('</svg>');
   return lines.join('\n');
@@ -170,7 +279,7 @@ function nearestKey(ev) {
   pt.x = ev.clientX; pt.y = ev.clientY;
   const p = pt.matrixTransform(svg.getScreenCTM().inverse());
   let best = null, bestD = Infinity;
-  for (const [i, j] of latticePoints(state.rings)) {
+  for (const [i, j] of currentLattice(state)) {
     const [x, y] = centerOf(i, j);
     const d = Math.hypot(p.x - x, p.y - y);
     if (d < bestD) { bestD = d; best = i + ',' + j; }
@@ -180,18 +289,16 @@ function nearestKey(ev) {
 
 svg.addEventListener('mousemove', (ev) => {
   const k = nearestKey(ev);
-  if (k !== hoverKey) { hoverKey = k; render(); }
+  if (k !== hoverKey) { hoverKey = k; reconcile(); }
 });
-svg.addEventListener('mouseleave', () => { if (hoverKey) { hoverKey = null; render(); } });
-
+svg.addEventListener('mouseleave', () => { if (hoverKey) { hoverKey = null; reconcile(); } });
 svg.addEventListener('click', (ev) => {
   const k = nearestKey(ev);
   if (!k) return;
   if (state.removed.has(k)) { state.removed.delete(k); history.push({ key: k, action: 'restore' }); }
   else { state.removed.add(k); history.push({ key: k, action: 'remove' }); }
-  render();
+  reconcile();
 });
-
 document.addEventListener('keydown', (ev) => {
   if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') {
     ev.preventDefault();
@@ -199,21 +306,38 @@ document.addEventListener('keydown', (ev) => {
     if (!last) return;
     if (last.action === 'remove') state.removed.delete(last.key);
     else state.removed.add(last.key);
-    render();
+    reconcile();
   }
 });
 
-document.getElementById('rings').addEventListener('input', (ev) => {
-  state.rings = parseInt(ev.target.value, 10);
-  document.getElementById('ringsVal').textContent = state.rings;
-  render();
+const growthWrap = document.getElementById('growthWrap');
+const zoomWrap = document.getElementById('zoomWrap');
+const boundaryWrap = document.getElementById('boundaryWrap');
+
+document.getElementById('frame').addEventListener('change', (ev) => {
+  state.frame = ev.target.value;
+  const sq = state.frame === 'square';
+  growthWrap.classList.toggle('hidden', sq);
+  zoomWrap.classList.toggle('hidden', !sq);
+  boundaryWrap.classList.toggle('hidden', sq);
+  reconcile();
 });
-document.getElementById('weight').addEventListener('change', (ev) => { state.weight = ev.target.value; render(); });
-document.getElementById('boundary').addEventListener('change', (ev) => { state.boundary = ev.target.checked; render(); });
+document.getElementById('growth').addEventListener('input', (ev) => {
+  state.growth = parseInt(ev.target.value, 10);
+  document.getElementById('stageName').textContent = STAGE_NAMES[state.growth];
+  reconcile();
+});
+document.getElementById('zoom').addEventListener('input', (ev) => {
+  state.zoom = parseInt(ev.target.value, 10);
+  document.getElementById('zoomVal').textContent = state.zoom;
+  reconcile();
+});
+document.getElementById('weight').addEventListener('change', (ev) => { state.weight = ev.target.value; reconcile(); });
+document.getElementById('boundary').addEventListener('change', (ev) => { state.boundary = ev.target.checked; reconcile(); });
 document.getElementById('restoreAll').addEventListener('click', () => {
   for (const k of state.removed) history.push({ key: k, action: 'restore' });
   state.removed.clear();
-  render();
+  reconcile();
 });
 
 // ---------- save flow ----------
@@ -225,14 +349,46 @@ document.getElementById('saveGo').addEventListener('click', () => {
   const text = serialize(state, variant);
   const blob = new Blob([text], { type: 'image/svg+xml' });
   const a = document.createElement('a');
+  const frameTag = state.frame === 'square' ? `square-z${state.zoom}` : STAGE_NAMES[state.growth].toLowerCase().replace(/ /g, '-');
   a.href = URL.createObjectURL(blob);
-  a.download = `flower-of-life-r${state.rings}-${state.weight}-${variant}.svg`;
+  a.download = `flower-of-life-${frameTag}-${state.weight}-${variant}.svg`;
   a.click();
   URL.revokeObjectURL(a.href);
   panel.classList.remove('open');
 });
 
-render();
+// URL options: ?still skips the opening animation; ?frame=square opens in the square frame
+const params = new URLSearchParams(location.search);
+if (params.has('still')) document.body.classList.add('no-anim');
+if (params.has('frame') && params.get('frame') === 'square') {
+  state.frame = 'square';
+  document.getElementById('frame').value = 'square';
+  growthWrap.classList.add('hidden'); boundaryWrap.classList.add('hidden');
+  zoomWrap.classList.remove('hidden');
+}
+if (params.has('still') || state.frame === 'square') {
+  view = { cx: 0, half: metrics(state).viewHalf };
+  applyView();
+  reconcile();
+} else {
+
+// opening breath: begin at one circle, grow to the full flower
+state.growth = 0;
+document.getElementById('growth').value = 0;
+document.getElementById('stageName').textContent = STAGE_NAMES[0];
+view = { cx: 0, half: metrics(state).viewHalf };
+applyView();
+reconcile();
+let openStage = 0;
+const opening = setInterval(() => {
+  openStage++;
+  if (openStage > 4) { clearInterval(opening); return; }
+  state.growth = openStage;
+  document.getElementById('growth').value = openStage;
+  document.getElementById('stageName').textContent = STAGE_NAMES[openStage];
+  reconcile();
+}, 1100);
+}
 </script>
 </body>
 </html>
