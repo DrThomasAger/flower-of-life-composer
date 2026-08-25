@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Flower of Life Composer</title>
+<style>
+  body { margin: 0; background: #0b0b0f; color: #eee; font-family: Georgia, serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+  h1 { font-weight: normal; font-size: 1.3em; letter-spacing: 0.12em; margin: 18px 0 6px; }
+  #controls { display: flex; gap: 22px; align-items: center; margin: 10px 0 14px; flex-wrap: wrap; justify-content: center; }
+  label { font-size: 0.95em; }
+  input[type=range] { vertical-align: middle; }
+  button { background: #1c1c26; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 7px 16px; font-family: inherit; font-size: 0.95em; cursor: pointer; }
+  button:hover { border-color: #999; }
+  #stage { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; position: relative; }
+  svg#canvas { max-width: min(88vw, 74vh); max-height: 74vh; cursor: pointer; }
+  #hint { font-size: 0.85em; color: #999; margin: 8px 0 16px; }
+  #savePanel { position: fixed; inset: 0; background: rgba(5,5,10,0.7); display: none; align-items: center; justify-content: center; }
+  #savePanel.open { display: flex; }
+  #saveCard { background: #15151d; border: 1px solid #444; border-radius: 10px; padding: 22px 28px; min-width: 300px; }
+  #saveCard h2 { font-weight: normal; font-size: 1.05em; margin: 0 0 12px; letter-spacing: 0.08em; }
+  fieldset { border: 1px solid #333; border-radius: 6px; margin: 0 0 12px; padding: 8px 12px; }
+  legend { font-size: 0.85em; color: #aaa; padding: 0 6px; }
+  fieldset label { display: block; margin: 4px 0; cursor: pointer; }
+  #saveActions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 6px; }
+</style>
+</head>
+<body>
+<h1>Flower of Life Composer</h1>
+<div id="controls">
+  <label>Rings <input type="range" id="rings" min="1" max="7" step="1" value="3"> <span id="ringsVal">3</span></label>
+  <label>Weight
+    <select id="weight">
+      <option value="light">Light</option>
+      <option value="regular" selected>Regular</option>
+      <option value="bold">Bold</option>
+    </select>
+  </label>
+  <label><input type="checkbox" id="boundary" checked> Boundary rings</label>
+  <button id="restoreAll">Restore all circles</button>
+  <button id="save">Save SVG</button>
+</div>
+<div id="stage"><svg id="canvas" xmlns="http://www.w3.org/2000/svg"></svg></div>
+<div id="hint">Hover shows which circle you'll touch &middot; click removes it &middot; click a ghost to restore &middot; Ctrl+Z undoes</div>
+
+<div id="savePanel">
+  <div id="saveCard">
+    <h2>Save your composition</h2>
+    <fieldset>
+      <legend>Variant</legend>
+      <label><input type="radio" name="variant" value="negative" checked> White lines, transparent background</label>
+      <label><input type="radio" name="variant" value="positive"> Dark lines, transparent background</label>
+      <label><input type="radio" name="variant" value="ground"> White lines on black ground</label>
+    </fieldset>
+    <div id="saveActions">
+      <button id="saveCancel">Cancel</button>
+      <button id="saveGo">Download</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------- model ----------
+const R = 100;
+const S = Math.sqrt(3) / 2 * R;
+const WEIGHTS = { light: 0.008, regular: 0.014, bold: 0.024 }; // stroke as ratio of clip radius
+const state = {
+  rings: 3,
+  removed: new Set(),   // "i,j" keys, kept indefinitely as durable intent
+  boundary: true,
+  weight: 'regular',
+};
+const history = [];      // { key, action: 'remove' | 'restore' }
+let hoverKey = null;
+let exportCounter = 0;
+
+function latticePoints(rings) {
+  const pts = [];
+  const maxK = rings * rings;
+  for (let i = -rings; i <= rings; i++)
+    for (let j = -rings; j <= rings; j++)
+      if (i * i + i * j + j * j <= maxK) pts.push([i, j]);
+  return pts;
+}
+function centerOf(i, j) { return [i * R + j * R / 2, j * S]; }
+function metrics(st) {
+  const clipR = st.rings * R;
+  const stroke = Math.max(clipR * WEIGHTS[st.weight], 1);
+  const gap = stroke * 3;                       // boundary separation, stroke-relative
+  const outerR = clipR + gap + stroke;          // second boundary ring
+  const half = (st.boundary ? outerR : clipR) + stroke * 2 + 6;
+  return { clipR, stroke, gap, outerR, half };
+}
+
+// ---------- render (screen only: ghosts + hover live here, never in export) ----------
+const svg = document.getElementById('canvas');
+const ns = 'http://www.w3.org/2000/svg';
+
+function render() {
+  const m = metrics(state);
+  svg.setAttribute('viewBox', `${-m.half} ${-m.half} ${2 * m.half} ${2 * m.half}`);
+  svg.innerHTML = '';
+
+  const bg = document.createElementNS(ns, 'rect');
+  bg.setAttribute('x', -m.half); bg.setAttribute('y', -m.half);
+  bg.setAttribute('width', 2 * m.half); bg.setAttribute('height', 2 * m.half);
+  bg.setAttribute('fill', '#000000');
+  svg.appendChild(bg);
+
+  const defs = document.createElementNS(ns, 'defs');
+  defs.innerHTML = `<clipPath id="screenClip"><circle cx="0" cy="0" r="${m.clipR}"/></clipPath>`;
+  svg.appendChild(defs);
+
+  const g = document.createElementNS(ns, 'g');
+  g.setAttribute('clip-path', 'url(#screenClip)');
+  g.setAttribute('fill', 'none');
+  for (const [i, j] of latticePoints(state.rings)) {
+    const key = i + ',' + j;
+    const [x, y] = centerOf(i, j);
+    const c = document.createElementNS(ns, 'circle');
+    c.setAttribute('cx', x.toFixed(2)); c.setAttribute('cy', y.toFixed(2)); c.setAttribute('r', R);
+    const isRemoved = state.removed.has(key);
+    const isHover = key === hoverKey;
+    c.setAttribute('stroke', '#ffffff');
+    c.setAttribute('stroke-width', (isHover ? m.stroke * 1.8 : m.stroke).toFixed(2));
+    c.setAttribute('stroke-opacity', isRemoved ? (isHover ? 0.35 : 0.12) : (isHover ? 1 : 0.85));
+    g.appendChild(c);
+  }
+  svg.appendChild(g);
+
+  if (state.boundary) {
+    for (const rr of [m.clipR + m.stroke / 2, m.outerR]) {
+      const c = document.createElementNS(ns, 'circle');
+      c.setAttribute('cx', 0); c.setAttribute('cy', 0); c.setAttribute('r', rr.toFixed(2));
+      c.setAttribute('fill', 'none'); c.setAttribute('stroke', '#ffffff');
+      c.setAttribute('stroke-width', m.stroke.toFixed(2));
+      c.setAttribute('stroke-opacity', 0.85);
+      svg.appendChild(c);
+    }
+  }
+}
+
+// ---------- serialize (pure, deterministic, no DOM) ----------
+function serialize(st, variant) {
+  const m = metrics(st);
+  const color = variant === 'positive' ? '#111111' : '#ffffff';
+  const clipId = `fol-clip-${st.rings}-${st.weight}-${++exportCounter}`;
+  const lines = [];
+  lines.push('<?xml version="1.0" encoding="UTF-8"?>');
+  lines.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-m.half} ${-m.half} ${2 * m.half} ${2 * m.half}">`);
+  if (variant === 'ground') lines.push(`  <rect x="${-m.half}" y="${-m.half}" width="${2 * m.half}" height="${2 * m.half}" fill="#000000"/>`);
+  lines.push(`  <defs><clipPath id="${clipId}"><circle cx="0" cy="0" r="${m.clipR}"/></clipPath></defs>`);
+  lines.push(`  <g clip-path="url(#${clipId})" fill="none" stroke="${color}" stroke-width="${m.stroke.toFixed(2)}">`);
+  for (const [i, j] of latticePoints(st.rings)) {
+    if (st.removed.has(i + ',' + j)) continue;   // removals outside current radius simply never appear
+    const [x, y] = centerOf(i, j);
+    lines.push(`    <circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${R}"/>`);
+  }
+  lines.push('  </g>');
+  if (st.boundary) {
+    lines.push(`  <circle cx="0" cy="0" r="${(m.clipR + m.stroke / 2).toFixed(2)}" fill="none" stroke="${color}" stroke-width="${m.stroke.toFixed(2)}"/>`);
+    lines.push(`  <circle cx="0" cy="0" r="${m.outerR.toFixed(2)}" fill="none" stroke="${color}" stroke-width="${m.stroke.toFixed(2)}"/>`);
+  }
+  lines.push('</svg>');
+  return lines.join('\n');
+}
+
+// ---------- interaction ----------
+function nearestKey(ev) {
+  const pt = svg.createSVGPoint();
+  pt.x = ev.clientX; pt.y = ev.clientY;
+  const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+  let best = null, bestD = Infinity;
+  for (const [i, j] of latticePoints(state.rings)) {
+    const [x, y] = centerOf(i, j);
+    const d = Math.hypot(p.x - x, p.y - y);
+    if (d < bestD) { bestD = d; best = i + ',' + j; }
+  }
+  return bestD <= R * 0.55 ? best : null;
+}
+
+svg.addEventListener('mousemove', (ev) => {
+  const k = nearestKey(ev);
+  if (k !== hoverKey) { hoverKey = k; render(); }
+});
+svg.addEventListener('mouseleave', () => { if (hoverKey) { hoverKey = null; render(); } });
+
+svg.addEventListener('click', (ev) => {
+  const k = nearestKey(ev);
+  if (!k) return;
+  if (state.removed.has(k)) { state.removed.delete(k); history.push({ key: k, action: 'restore' }); }
+  else { state.removed.add(k); history.push({ key: k, action: 'remove' }); }
+  render();
+});
+
+document.addEventListener('keydown', (ev) => {
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') {
+    ev.preventDefault();
+    const last = history.pop();
+    if (!last) return;
+    if (last.action === 'remove') state.removed.delete(last.key);
+    else state.removed.add(last.key);
+    render();
+  }
+});
+
+document.getElementById('rings').addEventListener('input', (ev) => {
+  state.rings = parseInt(ev.target.value, 10);
+  document.getElementById('ringsVal').textContent = state.rings;
+  render();
+});
+document.getElementById('weight').addEventListener('change', (ev) => { state.weight = ev.target.value; render(); });
+document.getElementById('boundary').addEventListener('change', (ev) => { state.boundary = ev.target.checked; render(); });
+document.getElementById('restoreAll').addEventListener('click', () => {
+  for (const k of state.removed) history.push({ key: k, action: 'restore' });
+  state.removed.clear();
+  render();
+});
+
+// ---------- save flow ----------
+const panel = document.getElementById('savePanel');
+document.getElementById('save').addEventListener('click', () => { panel.classList.add('open'); });
+document.getElementById('saveCancel').addEventListener('click', () => { panel.classList.remove('open'); });
+document.getElementById('saveGo').addEventListener('click', () => {
+  const variant = document.querySelector('input[name="variant"]:checked').value;
+  const text = serialize(state, variant);
+  const blob = new Blob([text], { type: 'image/svg+xml' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `flower-of-life-r${state.rings}-${state.weight}-${variant}.svg`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  panel.classList.remove('open');
+});
+
+render();
+</script>
+</body>
+</html>
