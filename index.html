@@ -41,7 +41,7 @@
       <option value="square">Square</option>
     </select>
   </label>
-  <label id="growthWrap">Growth <input type="range" id="growth" min="0" max="8" step="1" value="4"> <span id="stageName">Full Flower</span></label>
+  <label id="growthWrap">Growth <input type="range" id="growth" min="0" max="12" step="1" value="0"> <span id="stageName">One Circle</span></label>
   <label id="zoomWrap" class="hidden">Zoom <input type="range" id="zoom" min="1" max="6" step="1" value="2"> <span id="zoomVal">2</span></label>
   <label>Weight
     <select id="weight">
@@ -51,6 +51,7 @@
     </select>
   </label>
   <label id="boundaryWrap"><input type="checkbox" id="boundary" checked> Boundary rings</label>
+  <button id="revealMode">Reveal</button>
   <button id="restoreMode">Show removed</button>
   <button id="restoreAll">Restore all circles</button>
   <button id="save">Save SVG</button>
@@ -80,15 +81,17 @@
 const R = 100;
 const S = Math.sqrt(3) / 2 * R;
 const WEIGHTS = { light: 0.008, regular: 0.014, bold: 0.024 };
-const STAGE_NAMES = ['One Circle', 'Vesica Piscis', 'Seed of Life', 'Flower of Life', 'Full Flower', 'Five Rings', 'Six Rings', 'Seven Rings', 'Eight Rings'];
+const STAGE_NAMES = ['One Circle', 'Vesica Piscis', 'Three Circles', 'Four Circles', 'Five Circles', 'Six Circles', 'Seed of Life', 'Flower of Life', 'Full Flower', 'Four Rings', 'Five Rings', 'Six Rings', 'Seven Rings'];
+const RING_ORDER = [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]]; // one circle at a time around the center
 const state = {
   frame: 'circle',      // 'circle' | 'square'
-  growth: 4,            // 0 one circle, 1 vesica piscis, 2 seed, 3 flower(19), 4 full flower, then outward
+  growth: 0,            // 0 one circle, 1 vesica piscis, 2 seed, 3 flower(19), 4 full flower, then outward
   zoom: 2,              // square frame: half-width = zoom * R * 1.5
   removed: new Set(),   // "i,j" keys, durable intent
   boundary: true,
   weight: 'regular',
   restoreMode: false,  // reveal all removed circles faintly; only they respond, ends itself when all have returned
+  revealMode: false,   // canvas emptied; each click brings one circle into presence, revealed ones are settled
 };
 const history = [];
 let hoverKey = null;
@@ -115,9 +118,8 @@ function currentLattice(st) {
         const [x, y] = centerOf(i, j);
         if (Math.abs(x) <= half + R && Math.abs(y) <= half + R) pts.push([i, j]);
       }
-  } else if (st.growth === 0) pts = [[0, 0]];
-  else if (st.growth === 1) pts = [[0, 0], [1, 0]];
-  else pts = hexLattice(st.growth - 1);
+  } else if (st.growth <= 5) pts = [[0, 0]].concat(RING_ORDER.slice(0, st.growth));
+  else pts = hexLattice(st.growth - 5);
   // construction order: distance from origin, then angle
   return pts.sort((a, b) => {
     const [ax, ay] = centerOf(a[0], a[1]), [bx, by] = centerOf(b[0], b[1]);
@@ -135,7 +137,9 @@ function metrics(st) {
   let clipR, cx = 0, cy = 0;
   if (st.growth === 0) clipR = R;
   else if (st.growth === 1) { clipR = 1.5 * R; cy = R / 2; }
-  else clipR = (st.growth - 1) * R;
+  else if (st.growth <= 6) clipR = 2 * R;          // construction and seed: circles whole
+  else if (st.growth === 7) clipR = 3 * R;         // flower of life: nineteen whole circles
+  else clipR = (st.growth - 5) * R;                // full flower onward: boundary arcs begin
   const stroke = Math.max(Math.max(clipR, 250) * WEIGHTS[st.weight], 3);
   const gap = stroke * 3;
   const outerR = clipR + gap + stroke;
@@ -337,7 +341,7 @@ function nearestKey(ev) {
   let best = null, bestD = Infinity;
   for (const [i, j] of currentLattice(state)) {
     const key = i + ',' + j;
-    if (state.restoreMode && !state.removed.has(key)) continue; // only absences respond in restore mode
+    if ((state.restoreMode || state.revealMode) && !state.removed.has(key)) continue; // only absences respond in these modes
     const [x, y] = centerOf(i, j);
     const d = Math.hypot(p.x - x, p.y - y);
     if (d < bestD) { bestD = d; best = key; }
@@ -354,7 +358,7 @@ svg.addEventListener('click', (ev) => {
   const k = nearestKey(ev);
   if (!k) return;
   if (state.removed.has(k)) { state.removed.delete(k); history.push({ key: k, action: 'restore' }); }
-  else if (!state.restoreMode) { state.removed.add(k); history.push({ key: k, action: 'remove' }); }
+  else if (!state.restoreMode && !state.revealMode) { state.removed.add(k); history.push({ key: k, action: 'remove' }); }
   if (state.restoreMode && state.removed.size === 0) setRestoreMode(false); // all returned: the mode completes itself
   reconcile();
 });
@@ -393,6 +397,25 @@ document.getElementById('zoom').addEventListener('input', (ev) => {
 });
 document.getElementById('weight').addEventListener('change', (ev) => { state.weight = ev.target.value; reconcile(); });
 document.getElementById('boundary').addEventListener('change', (ev) => { state.boundary = ev.target.checked; reconcile(); });
+const revealModeBtn = document.getElementById('revealMode');
+function setRevealMode(on) {
+  state.revealMode = on;
+  revealModeBtn.classList.toggle('active', on);
+  revealModeBtn.textContent = on ? 'Revealing…' : 'Reveal';
+}
+revealModeBtn.addEventListener('click', () => {
+  if (!state.revealMode) {
+    if (state.restoreMode) setRestoreMode(false);
+    for (const [i, j] of currentLattice(state)) {   // empty the canvas: everything becomes absence
+      const key = i + ',' + j;
+      if (!state.removed.has(key)) { state.removed.add(key); history.push({ key, action: 'remove' }); }
+    }
+    setRevealMode(true);
+  } else {
+    setRevealMode(false);   // keep what has been revealed, return to normal composing
+  }
+  reconcile();
+});
 const restoreModeBtn = document.getElementById('restoreMode');
 function setRestoreMode(on) {
   state.restoreMode = on;
@@ -401,6 +424,7 @@ function setRestoreMode(on) {
 }
 restoreModeBtn.addEventListener('click', () => {
   if (!state.restoreMode && state.removed.size === 0) return; // nothing is absent
+  if (state.revealMode) setRevealMode(false);
   setRestoreMode(!state.restoreMode);
   reconcile();
 });
@@ -408,6 +432,7 @@ document.getElementById('restoreAll').addEventListener('click', () => {
   for (const k of state.removed) history.push({ key: k, action: 'restore' });
   state.removed.clear();
   if (state.restoreMode) setRestoreMode(false);
+  if (state.revealMode) setRevealMode(false);
   reconcile();
 });
 
@@ -437,7 +462,7 @@ function stepPattern(dir) {
     document.getElementById('zoom').value = z;
     document.getElementById('zoomVal').textContent = z;
   } else {
-    const g = Math.min(8, Math.max(0, state.growth + dir));
+    const g = Math.min(12, Math.max(0, state.growth + dir));
     if (g === state.growth) return;
     state.growth = g;
     document.getElementById('growth').value = g;
@@ -461,11 +486,13 @@ if (params.has('frame') && params.get('frame') === 'square') {
   zoomWrap.classList.remove('hidden');
 }
 
-// begin at one circle, ready to grow by hand
+// begin at one circle (or ?growth=N), ready to grow by hand
 if (state.frame !== 'square') {
-  state.growth = 0;
-  document.getElementById('growth').value = 0;
-  document.getElementById('stageName').textContent = STAGE_NAMES[0];
+  let g = 0;
+  if (params.has('growth')) g = Math.min(12, Math.max(0, parseInt(params.get('growth'), 10) || 0));
+  state.growth = g;
+  document.getElementById('growth').value = g;
+  document.getElementById('stageName').textContent = STAGE_NAMES[g];
 }
 view = { cx: 0, cy: metrics(state).cy, half: metrics(state).viewHalf };
 applyView();
