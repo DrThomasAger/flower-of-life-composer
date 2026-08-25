@@ -8,10 +8,13 @@ An open workshop for living geometry. One HTML file, no dependencies, no build s
 
 ## What it does
 
-- **Grow the pattern** — a slider extends the flower from a single rosette out to seven rings
-- **Compose by touch** — hover shows which circle you'll affect; click removes it, leaving a ghost; click the ghost to restore it; Ctrl+Z undoes
-- **Choose your weight** — light, regular, or bold line work, visually consistent at every scale
-- **Export clean geometry** — download your composition as SVG: white lines on transparent, dark lines on transparent, or white on black ground, with a filename that describes what it is
+- **Grow the classical construction one circle at a time** — One Circle, Vesica Piscis, three through six placed around the center, Seed of Life, Flower of Life, Full Flower, out to seven rings. The big button (or the arrow keys) walks it; each new circle emerges from behind the existing pattern, animated, so the form unfolds out of itself
+- **Two shapes** — the bounded Emblem, or the Tiling: a zoomable square window cut from the endless pattern
+- **Three ways of editing** — Erase (click a circle to remove it), Paint (start from emptiness, click circles into presence), Repair (all absences shown faintly, click to bring them back) — with a sentence on screen always saying what a click does right now, plus Undo and Ctrl+Z
+- **Line thickness** — thin, medium, or bold, visually consistent at every scale
+- **Export clean geometry** — download your composition as SVG: white lines on transparent, dark lines on transparent, or white on black ground, with a filename that describes what it is. Exports are still geometry; the animation lives only in the composing
+
+URL options: `?still` disables animation, `?frame=square` opens in the Tiling shape, `?growth=N` opens at stage N.
 
 Every export is pure vector construction — circles on a hexagonal lattice, clipped by a boundary, enclosed in a double ring. Crisp at any size, from favicon to building facade.
 
