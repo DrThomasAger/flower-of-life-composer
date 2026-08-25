@@ -62,6 +62,8 @@
       </select>
     </label>
     <label id="boundaryWrap"><input type="checkbox" id="boundary" checked> Outer border</label>
+    <label>Line colour <input type="color" id="lineColor" value="#ffffff"></label>
+    <label>Background <input type="color" id="bgColor" value="#000000"></label>
   </div>
   <div class="group">
     <div class="groupTitle">Editing</div>
@@ -88,9 +90,8 @@
     <h2>Save your composition</h2>
     <fieldset>
       <legend>Variant</legend>
-      <label><input type="radio" name="variant" value="negative" checked> White lines, transparent background</label>
-      <label><input type="radio" name="variant" value="positive"> Dark lines, transparent background</label>
-      <label><input type="radio" name="variant" value="ground"> White lines on black ground</label>
+      <label><input type="radio" name="variant" value="ground" checked> Your colours, with the background</label>
+      <label><input type="radio" name="variant" value="transparent"> Your line colour, transparent background</label>
     </fieldset>
     <div id="saveActions">
       <button id="saveCancel">Cancel</button>
@@ -113,6 +114,8 @@ const state = {
   removed: new Set(),   // "i,j" keys, durable intent
   boundary: true,
   weight: 'regular',
+  lineColor: '#ffffff',
+  bgColor: '#000000',
   restoreMode: false,  // reveal all removed circles faintly; only they respond, ends itself when all have returned
   revealMode: false,   // canvas emptied; each click brings one circle into presence, revealed ones are settled
 };
@@ -188,7 +191,7 @@ let dying = new Map();         // key -> removal timer
 
 // static scaffolding
 svg.innerHTML = `
-  <rect x="-4000" y="-4000" width="8000" height="8000" fill="#000000"/>
+  <rect id="bgRect" x="-4000" y="-4000" width="8000" height="8000" fill="#000000"/>
   <defs>
     <clipPath id="clipCircle"><circle cx="0" cy="0" r="300"/></clipPath>
     <clipPath id="clipSquare"><rect x="-300" y="-300" width="600" height="600"/></clipPath>
@@ -233,6 +236,7 @@ function reconcile() {
   const targetKeys = new Set(lattice.map(([i, j]) => i + ',' + j));
 
   tweenView(m.cx, m.cy, m.viewHalf);
+  document.getElementById('bgRect').setAttribute('fill', state.bgColor);
 
   // clip
   if (m.mode === 'circle') {
@@ -252,8 +256,9 @@ function reconcile() {
     el.setAttribute('cx', m.cx);
     el.setAttribute('cy', m.cy);
     el.style.r = Math.max(rr, 0) + 'px';
+    el.setAttribute('stroke', state.lineColor);
     el.setAttribute('stroke-width', m.stroke.toFixed(2));
-    el.setAttribute('stroke-opacity', showB ? 0.85 : 0);
+    el.setAttribute('stroke-opacity', showB ? 1 : 0);
   }
 
   // circles already present before this change — the pattern the new ones emerge from
@@ -316,6 +321,7 @@ function reconcile() {
       el.style.r = R + 'px';
       el.style.strokeOpacity = ''; // revive if it was withdrawing
     }
+    el.setAttribute('stroke', state.lineColor);
     el.setAttribute('stroke-width', m.stroke.toFixed(2));
     el.setAttribute('stroke-opacity', opacityFor(key));
   });
@@ -344,13 +350,13 @@ function reconcile() {
 // ---------- serialize (pure, still geometry, no animation) ----------
 function serialize(st, variant) {
   const m = metrics(st);
-  const color = variant === 'positive' ? '#111111' : '#ffffff';
+  const color = st.lineColor;
   const clipId = `fol-clip-${++exportCounter}`;
   const half = m.viewHalf, cx = m.cx, cy = m.cy;
   const lines = [];
   lines.push('<?xml version="1.0" encoding="UTF-8"?>');
   lines.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${(cx - half).toFixed(1)} ${(cy - half).toFixed(1)} ${(2 * half).toFixed(1)} ${(2 * half).toFixed(1)}">`);
-  if (variant === 'ground') lines.push(`  <rect x="${(cx - half).toFixed(1)}" y="${(cy - half).toFixed(1)}" width="${(2 * half).toFixed(1)}" height="${(2 * half).toFixed(1)}" fill="#000000"/>`);
+  if (variant === 'ground') lines.push(`  <rect x="${(cx - half).toFixed(1)}" y="${(cy - half).toFixed(1)}" width="${(2 * half).toFixed(1)}" height="${(2 * half).toFixed(1)}" fill="${st.bgColor}"/>`);
   if (m.mode === 'circle' && !m.construction) lines.push(`  <defs><clipPath id="${clipId}"><circle cx="${m.cx}" cy="${m.cy}" r="${m.clipR}"/></clipPath></defs>`);
   else if (m.mode === 'square') lines.push(`  <defs><clipPath id="${clipId}"><rect x="${-m.half}" y="${-m.half}" width="${2 * m.half}" height="${2 * m.half}"/></clipPath></defs>`);
   lines.push(m.construction
@@ -375,8 +381,8 @@ function serialize(st, variant) {
 function opacityFor(key) {
   const removed = state.removed.has(key), hover = key === hoverKey;
   if (state.restoreMode) return removed ? (hover ? 0.7 : 0.3) : 0.35;  // the pattern recedes, absences step forward
-  if (state.revealMode) return removed ? (hover ? 0.4 : 0) : 0.9;      // what you have painted stands bright
-  return removed ? (hover ? 0.3 : 0) : (hover ? 1 : 0.85);
+  if (state.revealMode) return removed ? (hover ? 0.4 : 0) : 1;        // what you have painted stands solid
+  return removed ? (hover ? 0.3 : 0) : (hover ? 0.65 : 1);             // solid at rest; hover softens the one you'd touch
 }
 function restyleKey(key) {
   const el = circleEls.get(key);
@@ -453,6 +459,8 @@ document.getElementById('zoom').addEventListener('input', (ev) => {
   reconcile();
 });
 document.getElementById('weight').addEventListener('change', (ev) => { state.weight = ev.target.value; reconcile(); });
+document.getElementById('lineColor').addEventListener('input', (ev) => { state.lineColor = ev.target.value; reconcile(); });
+document.getElementById('bgColor').addEventListener('input', (ev) => { state.bgColor = ev.target.value; reconcile(); });
 document.getElementById('boundary').addEventListener('change', (ev) => { state.boundary = ev.target.checked; reconcile(); });
 // editing modes: one three-way switch, always saying what a click does right now
 const MODE_HINTS = {
