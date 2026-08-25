@@ -272,7 +272,7 @@ function reconcile() {
       el.style.strokeOpacity = ''; // revive if it was withdrawing
     }
     el.setAttribute('stroke-width', (isHover ? m.stroke * 1.8 : m.stroke).toFixed(2));
-    el.setAttribute('stroke-opacity', isRemoved ? (isHover ? 0.35 : 0.12) : (isHover ? 1 : 0.85));
+    el.setAttribute('stroke-opacity', isRemoved ? (isHover ? 0.3 : 0) : (isHover ? 1 : 0.85));
   });
 
   // withdrawing circles: slide back behind the nearest surviving circle
