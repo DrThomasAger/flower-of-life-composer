@@ -19,6 +19,8 @@
   .segment { border: none; border-radius: 0; padding: 7px 18px; background: #1c1c26; }
   .segment + .segment { border-left: 1px solid #444; }
   .segment.active { background: #3a3050; color: #fff; }
+  button:disabled { opacity: 0.35; cursor: default; }
+  button:disabled:hover { border-color: #444; }
   #modeHint { font-size: 0.9em; color: #bba; margin: 2px 0 8px; min-height: 1.2em; }
   #growBtn { font-size: 1.25em; letter-spacing: 0.14em; padding: 14px 64px; margin: 12px 0 4px; border-radius: 10px; border-color: #666; }
   #stage { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; }
@@ -196,7 +198,10 @@ let viewAnim = null;
 function applyView() {
   svg.setAttribute('viewBox', `${(view.cx - view.half).toFixed(1)} ${(view.cy - view.half).toFixed(1)} ${(2 * view.half).toFixed(1)} ${(2 * view.half).toFixed(1)}`);
 }
+let viewTarget = { cx: NaN, cy: NaN, half: NaN };
 function tweenView(cx, cy, half) {
+  if (cx === viewTarget.cx && cy === viewTarget.cy && half === viewTarget.half) return; // already there or on the way
+  viewTarget = { cx, cy, half };
   if (viewAnim) cancelAnimationFrame(viewAnim);
   applyView();
   const from = { ...view }, dur = 300, t0 = performance.now();
@@ -302,10 +307,9 @@ function reconcile() {
       el.style.strokeOpacity = ''; // revive if it was withdrawing
     }
     el.setAttribute('stroke-width', m.stroke.toFixed(2));
-    el.setAttribute('stroke-opacity', isRemoved
-      ? (state.restoreMode ? (isHover ? 0.6 : 0.25) : (isHover ? 0.3 : 0))
-      : (isHover ? 1 : 0.85));
+    el.setAttribute('stroke-opacity', opacityFor(key));
   });
+  updateModeAvailability();
 
   // withdrawing circles: slide back behind the nearest surviving circle
   for (const [key, el] of circleEls) {
@@ -355,6 +359,20 @@ function serialize(st, variant) {
 }
 
 // ---------- interaction ----------
+// one place decides how bright any circle is, in every mode
+function opacityFor(key) {
+  const removed = state.removed.has(key), hover = key === hoverKey;
+  if (state.restoreMode) return removed ? (hover ? 0.7 : 0.3) : 0.35;  // the pattern recedes, absences step forward
+  if (state.revealMode) return removed ? (hover ? 0.4 : 0) : 0.9;      // what you have painted stands bright
+  return removed ? (hover ? 0.3 : 0) : (hover ? 1 : 0.85);
+}
+function restyleKey(key) {
+  const el = circleEls.get(key);
+  if (el && !dying.has(key)) el.setAttribute('stroke-opacity', opacityFor(key));
+}
+function updateModeAvailability() {
+  modeButtons.repair.disabled = state.removed.size === 0 && !state.restoreMode;
+}
 function nearestKey(ev) {
   const pt = svg.createSVGPoint();
   pt.x = ev.clientX; pt.y = ev.clientY;
@@ -372,9 +390,18 @@ function nearestKey(ev) {
 
 svg.addEventListener('mousemove', (ev) => {
   const k = nearestKey(ev);
-  if (k !== hoverKey) { hoverKey = k; reconcile(); }
+  if (k === hoverKey) return;
+  const prev = hoverKey;
+  hoverKey = k;
+  if (prev) restyleKey(prev);   // touch only the two circles concerned — never the whole pattern
+  if (k) restyleKey(k);
 });
-svg.addEventListener('mouseleave', () => { if (hoverKey) { hoverKey = null; reconcile(); } });
+svg.addEventListener('mouseleave', () => {
+  if (!hoverKey) return;
+  const prev = hoverKey;
+  hoverKey = null;
+  restyleKey(prev);
+});
 svg.addEventListener('click', (ev) => {
   const k = nearestKey(ev);
   if (!k) return;
@@ -430,10 +457,9 @@ function setMode(mode) {
 }
 modeButtons.erase.addEventListener('click', () => { setMode('erase'); reconcile(); });
 modeButtons.paint.addEventListener('click', () => {
-  for (const [i, j] of currentLattice(state)) {   // empty the canvas: everything becomes absence
-    const key = i + ',' + j;
-    if (!state.removed.has(key)) { state.removed.add(key); history.push({ key, action: 'remove' }); }
-  }
+  if (state.revealMode) return; // already painting
+  history.push({ action: 'bulk', prev: [...state.removed] });  // one undo returns the whole prior composition
+  for (const [i, j] of currentLattice(state)) state.removed.add(i + ',' + j); // empty the canvas
   setMode('paint');
   reconcile();
 });
@@ -445,13 +471,14 @@ modeButtons.repair.addEventListener('click', () => {
 function undoOnce() {
   const last = history.pop();
   if (!last) return;
-  if (last.action === 'remove') state.removed.delete(last.key);
+  if (last.action === 'bulk') { state.removed = new Set(last.prev); if (state.revealMode) setMode('erase'); }
+  else if (last.action === 'remove') state.removed.delete(last.key);
   else state.removed.add(last.key);
   reconcile();
 }
 document.getElementById('undoBtn').addEventListener('click', undoOnce);
 document.getElementById('restoreAll').addEventListener('click', () => {
-  for (const k of state.removed) history.push({ key: k, action: 'restore' });
+  if (state.removed.size > 0) history.push({ action: 'bulk', prev: [...state.removed] });
   state.removed.clear();
   setMode('erase');
   reconcile();
