@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Flower of Life Composer</title>
 <style>
   body { margin: 0; background: #0b0b0f; color: #eee; font-family: Georgia, serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
@@ -24,7 +25,7 @@
   #modeHint { font-size: 0.9em; color: #bba; margin: 2px 0 8px; min-height: 1.2em; }
   #growBtn { font-size: 1.25em; letter-spacing: 0.14em; padding: 14px 64px; margin: 12px 0 4px; border-radius: 10px; border-color: #666; }
   #stage { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; }
-  svg#canvas { width: min(88vw, 72vh); height: min(88vw, 72vh); cursor: default; }
+  svg#canvas { width: min(88vw, 72vh); height: min(88vw, 72vh); cursor: default; touch-action: none; }
   /* one glide for everything: same duration, same curve, camera included */
   #canvas circle { transition: r 0.5s cubic-bezier(.3,.7,.25,1), cx 0.5s cubic-bezier(.3,.7,.25,1), cy 0.5s cubic-bezier(.3,.7,.25,1), stroke-opacity 0.12s ease, stroke-width 0.15s ease; }
   #canvas clipPath rect { transition: x 0.5s cubic-bezier(.3,.7,.25,1), y 0.5s cubic-bezier(.3,.7,.25,1), width 0.5s cubic-bezier(.3,.7,.25,1), height 0.5s cubic-bezier(.3,.7,.25,1); }
@@ -47,6 +48,18 @@
   fieldset label { display: block; margin: 4px 0; cursor: pointer; }
   #saveActions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 6px; }
   .hidden { display: none !important; }
+  @media (max-width: 700px) {
+    h1 { font-size: 1.05em; margin: 12px 0 4px; }
+    #controls { gap: 10px; margin: 6px 0 8px; padding: 0 8px; width: 100%; box-sizing: border-box; flex-direction: column; align-items: stretch; }
+    .group { gap: 10px; padding: 12px 10px 8px; flex-wrap: wrap; justify-content: center; width: 100%; min-width: 0; box-sizing: border-box; }
+    #stageName { min-width: 0; }
+    input[type=range] { width: 32vw; }
+    label, button { font-size: 0.88em; }
+    .segment { padding: 7px 12px; }
+    #growBtn { font-size: 1.05em; padding: 12px 36px; margin: 8px 0 4px; }
+    #modeHint, #hint { padding: 0 12px; text-align: center; }
+    svg#canvas { width: 96vw; height: 96vw; max-height: 62vh; }
+  }
 </style>
 </head>
 <body>
@@ -523,6 +536,67 @@ svg.addEventListener('wheel', (ev) => {
   view.half = half;
   applyView();
 }, { passive: false });
+
+// touch: one finger travels, two fingers breathe the view larger and smaller, a tap chooses
+let pinch = null; // { dist, mid: {x, y} } in client space
+function toPattern(clientX, clientY) {
+  const pt = svg.createSVGPoint();
+  pt.x = clientX; pt.y = clientY;
+  return pt.matrixTransform(svg.getScreenCTM().inverse());
+}
+svg.addEventListener('touchstart', (ev) => {
+  if (ev.touches.length === 1) {
+    dragging = true; dragMoved = 0; pinch = null;
+    lastClient = { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
+  } else if (ev.touches.length === 2) {
+    dragging = false;
+    const [a, b] = ev.touches;
+    pinch = { dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
+              mid: { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 } };
+  }
+}, { passive: true });
+svg.addEventListener('touchmove', (ev) => {
+  if (pinch && ev.touches.length === 2) {
+    ev.preventDefault();
+    takeCamera();
+    const [a, b] = ev.touches;
+    const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    const mid = { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 };
+    const p = toPattern(mid.x, mid.y);
+    const half = Math.min(Math.max(view.half * (pinch.dist / Math.max(dist, 1)), 33), 220000);
+    const f = half / view.half;
+    view.cx = p.x + (view.cx - p.x) * f;
+    view.cy = p.y + (view.cy - p.y) * f;
+    view.half = half;
+    const scale = (2 * view.half) / svg.getBoundingClientRect().width;
+    view.cx -= (mid.x - pinch.mid.x) * scale;
+    view.cy -= (mid.y - pinch.mid.y) * scale;
+    applyView();
+    pinch = { dist, mid };
+    dragMoved = 44; // the journey ends without touching a circle
+    return;
+  }
+  if (dragging && ev.touches.length === 1) {
+    const t = ev.touches[0];
+    const dx = t.clientX - lastClient.x, dy = t.clientY - lastClient.y;
+    lastClient = { x: t.clientX, y: t.clientY };
+    dragMoved += Math.abs(dx) + Math.abs(dy);
+    if (dragMoved < 4) return; // a still finger is a tap
+    ev.preventDefault();
+    takeCamera();
+    const scale = (2 * view.half) / svg.getBoundingClientRect().width;
+    view.cx -= dx * scale;
+    view.cy -= dy * scale;
+    applyView();
+  }
+}, { passive: false });
+svg.addEventListener('touchend', (ev) => {
+  if (ev.touches.length === 0) { dragging = false; pinch = null; }
+  else if (ev.touches.length === 1) {
+    pinch = null; dragging = true;
+    lastClient = { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
+  }
+}, { passive: true });
 
 svg.addEventListener('mousemove', (ev) => {
   if (dragging && dragMoved >= 4) return; // travelling, not choosing
