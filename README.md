@@ -8,13 +8,15 @@ An open workshop for living geometry. One HTML file, no dependencies, no build s
 
 ## What it does
 
-- **Grow the classical construction one circle at a time** — One Circle, Vesica Piscis, three through six placed around the center, Seed of Life, Flower of Life, Full Flower, out to seven rings. The big button (or the arrow keys) walks it; each new circle emerges from behind the existing pattern, animated, so the form unfolds out of itself
+- **Grow the classical construction one circle at a time** — One Circle, Vesica Piscis, three through six placed around the center, Seed of Life, Flower of Life, Full Flower, then ring upon ring out to 103 rings — around 37,000 circles. The big button (or the arrow keys) walks it; each new circle emerges from behind the existing pattern, animated, so the form unfolds out of itself, and the camera glides outward so the growing pattern always fills the screen
+- **Move through the pattern by hand** — drag with the mouse or a finger to travel, zoom with the wheel or a two-finger pinch toward wherever you point. The camera stays where you put it until the next growth step returns it to self-fitting
 - **Two shapes** — the bounded Emblem, or the Tiling: a zoomable square window cut from the endless pattern
 - **Three ways of editing** — Erase (click a circle to remove it), Paint (start from emptiness, click circles into presence), Repair (all absences shown faintly, click to bring them back) — with a sentence on screen always saying what a click does right now, plus Undo and Ctrl+Z
 - **Line thickness** — thin, medium, or bold, visually consistent at every scale
 - **Export clean geometry** — download your composition as SVG: white lines on transparent, dark lines on transparent, or white on black ground, with a filename that describes what it is. Exports are still geometry; the animation lives only in the composing
+- **Works on a phone** — the layout fits a narrow screen, a tap chooses a circle, and the pattern answers to your fingers
 
-URL options: `?still` disables animation, `?frame=square` opens in the Tiling shape, `?growth=N` opens at stage N.
+URL options: `?still` disables animation, `?frame=square` opens in the Tiling shape, `?growth=N` opens at stage N (0 to 108).
 
 Every export is pure vector construction — circles on a hexagonal lattice, clipped by a boundary, enclosed in a double ring. Crisp at any size, from favicon to building facade.
 

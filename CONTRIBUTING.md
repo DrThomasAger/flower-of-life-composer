@@ -12,7 +12,7 @@ Welcome. The barrier to entry here is a text editor and curiosity. The whole app
 - **render** — the on-screen view only; ghosts of removed circles and hover highlights live here and never reach the export
 - **serialize** — a pure function from state to SVG text; deterministic, no DOM
 
-Good first territories: save/load of compositions as small text files, a square lattice, polar construction for mandalas, touch support, color-respecting print exports.
+Good first territories: save/load of compositions as small text files, a square lattice, polar construction for mandalas, keyboard traversal of the lattice with screen-reader announcements, color-respecting print exports.
 
 **Geometers and historians** — the constructions deserve documentation of their lineage, so the tool teaches as it draws. Prose contributions are contributions.
 
